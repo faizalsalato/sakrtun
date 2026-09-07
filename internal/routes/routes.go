@@ -27,7 +27,7 @@ func Apply(p config.Profile, proxyHosts []string, logger Logger) (*Cleanup, erro
 		return &Cleanup{logger: logger}, nil
 	}
 	logger.Add("info", "applying TUN routes; admin/root permission may be required")
-	gw, iface, err := defaultGateway()
+	gw, iface, _, err := defaultGateway()
 	if err != nil {
 		logger.Add("warn", "cannot detect default gateway: %v", err)
 	}
@@ -519,12 +519,12 @@ func run(logger Logger, name string, args ...string) error {
 	return nil
 }
 
-func defaultGateway() (gateway string, iface string, err error) {
+func defaultGateway() (gateway string, iface string, ifIndex int, err error) {
 	switch runtime.GOOS {
 	case "linux":
 		out, err := oscmd.Command("ip", "route", "show", "default").Output()
 		if err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
 		fields := strings.Fields(string(out))
 		for i, f := range fields {
@@ -535,11 +535,11 @@ func defaultGateway() (gateway string, iface string, err error) {
 				iface = fields[i+1]
 			}
 		}
-		return gateway, iface, nil
+		return gateway, iface, 0, nil
 	case "darwin":
 		out, err := oscmd.Command("route", "-n", "get", "default").Output()
 		if err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
@@ -550,26 +550,27 @@ func defaultGateway() (gateway string, iface string, err error) {
 				iface = strings.TrimSpace(strings.TrimPrefix(line, "interface:"))
 			}
 		}
-		return gateway, iface, nil
+		return gateway, iface, 0, nil
 	case "windows":
 		ps := `Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
 Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } |
 Sort-Object RouteMetric, InterfaceMetric |
-Select-Object -First 1 NextHop,InterfaceAlias |
+Select-Object -First 1 NextHop,InterfaceAlias,InterfaceIndex |
 ConvertTo-Json -Compress`
 		out, err := oscmd.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps).Output()
 		if err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
 		var r struct {
 			NextHop        string
 			InterfaceAlias string
+			InterfaceIndex int
 		}
 		if err := json.Unmarshal(out, &r); err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
-		return r.NextHop, r.InterfaceAlias, nil
+		return r.NextHop, r.InterfaceAlias, r.InterfaceIndex, nil
 	default:
-		return "", "", fmt.Errorf("unsupported OS")
+		return "", "", 0, fmt.Errorf("unsupported OS")
 	}
 }

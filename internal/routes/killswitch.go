@@ -31,13 +31,20 @@ func BlockInternet(allowHosts []string, logger Logger) (*Cleanup, error) {
 }
 
 func blockWindows(allowHosts []string, cleanup *Cleanup, logger Logger) {
-	gw, _, err := defaultGateway()
+	gw, _, ifIndex, err := defaultGateway()
 	if err != nil || gw == "" {
 		logger.Add("warn", "kill switch: cannot detect IPv4 default gateway: %v", err)
 	}
 	if gw != "" {
 		if err := run(logger, "route", "delete", "0.0.0.0", "mask", "0.0.0.0"); err == nil {
-			cleanup.commands = append(cleanup.commands, []string{"route", "add", "0.0.0.0", "mask", "0.0.0.0", gw, "metric", "1"})
+			// Restore with an explicit interface: on some networks (VPS with
+			// /32 addresses, NAT links) route.exe cannot derive the interface
+			// from the gateway and fails with "Element not found".
+			restore := []string{"route", "add", "0.0.0.0", "mask", "0.0.0.0", gw, "metric", "1"}
+			if ifIndex > 0 {
+				restore = append(restore, "if", fmt.Sprint(ifIndex))
+			}
+			cleanup.commands = append(cleanup.commands, restore)
 			addBypassWindows(allowHosts, gw, cleanup, logger)
 		}
 	}
@@ -59,7 +66,7 @@ func blockWindows(allowHosts []string, cleanup *Cleanup, logger Logger) {
 }
 
 func blockLinux(allowHosts []string, cleanup *Cleanup, logger Logger) {
-	gw, iface, err := defaultGateway()
+	gw, iface, _, err := defaultGateway()
 	if err != nil || gw == "" {
 		logger.Add("warn", "kill switch: cannot detect IPv4 default gateway: %v", err)
 	}
@@ -91,7 +98,7 @@ func blockLinux(allowHosts []string, cleanup *Cleanup, logger Logger) {
 }
 
 func blockDarwin(allowHosts []string, cleanup *Cleanup, logger Logger) {
-	gw, _, err := defaultGateway()
+	gw, _, _, err := defaultGateway()
 	if err != nil || gw == "" {
 		logger.Add("warn", "kill switch: cannot detect IPv4 default gateway: %v", err)
 	}
