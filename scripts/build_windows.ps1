@@ -74,18 +74,15 @@ $manifest = "cmd\socksrevivepc\socksrevivepc.exe.manifest"
 $resource = "cmd\socksrevivepc\socksrevivepc_windows.rc"
 $syso = "cmd\socksrevivepc\admin_windows.syso"
 
-# Machines without a hardware OpenGL driver (VMs, remote desktop sessions)
-# cannot open the Fyne UI. Ship the Mesa software renderer next to the EXE so
-# the app opens there too; the app forces the stable "softpipe" backend.
-# On machines with a real GPU you can delete these DLLs from dist/ to use the
-# hardware driver instead.
+# Mesa software OpenGL for machines without a GPU driver (VMs, remote
+# sessions). Uses the official mesa-dist-win build, which is static-linked and
+# fast (llvmpipe with LLVM JIT). Only two DLLs are needed.
+# Source: https://github.com/pal1000/mesa-dist-win/releases (release-mingw.7z,
+# x64/opengl32.dll + x64/libgallium_wgl.dll)
 $mesaDlls = @(
-    "opengl32.dll", "libgallium_wgl.dll", "libLLVM-22.dll", "libSPIRV-Tools.dll",
-    "libsystre-0.dll", "libtre-5.dll", "libffi-8.dll", "libstdc++-6.dll",
-    "libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libxml2-16.dll",
-    "libiconv-2.dll", "libintl-8.dll", "zlib1.dll", "libzstd.dll"
+    "opengl32.dll", "libgallium_wgl.dll"
 )
-$mesaBin = "C:\msys64\ucrt64\bin"
+$mesaBin = Join-Path $PSScriptRoot "..\tools\mesa"
 $missingMesa = $false
 foreach ($dll in $mesaDlls) {
     $src = Join-Path $mesaBin $dll
@@ -96,7 +93,7 @@ foreach ($dll in $mesaDlls) {
     }
 }
 if ($missingMesa) {
-    Write-Info "Some Mesa software-OpenGL DLLs were not found in $mesaBin. The EXE still builds; machines without a GPU driver may fail to open the UI (install with: pacman -S mingw-w64-ucrt-x86_64-mesa)."
+    Write-Info "Mesa software-OpenGL DLLs missing in tools/mesa. The EXE still builds; machines without a GPU driver may fail to open the UI. Download mesa3d-*-release-mingw.7z from https://github.com/pal1000/mesa-dist-win/releases and copy x64/opengl32.dll + x64/libgallium_wgl.dll into tools/mesa."
 } else {
     Write-Info "Copied Mesa software OpenGL DLLs to dist/ (UI fallback for machines without GPU drivers)."
 }

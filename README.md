@@ -83,7 +83,7 @@ Install:
 - Go 1.22 or newer
 - MSYS2 UCRT64 GCC
 - MSYS2 binutils, for `windres.exe`
-- MSYS2 Mesa (optional, used for the software OpenGL DLLs shipped beside the EXE)
+- Mesa software OpenGL DLLs in `tools/mesa/` (downloaded automatically by the init script; used for machines without GPU drivers)
 
 ### One-command project initialization
 

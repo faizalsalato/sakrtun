@@ -15,13 +15,10 @@ func main() {
 	debug.SetTraceback("all")
 	// Some virtual machines and remote sessions have no hardware OpenGL
 	// driver. On those machines the bundled Mesa software renderer
-	// (opengl32.dll shipped next to the EXE) is used, and its default
-	// llvmpipe backend can abort the whole process (exit 0x80070057) while
-	// Fyne uploads textures. Force the simpler softpipe backend instead: it
-	// is pure software and stable. Real GPU drivers (NVIDIA/AMD/Intel) do
-	// not read this Mesa-specific variable, so hardware rendering is
-	// unaffected on normal machines.
-	_ = os.Setenv("GALLIUM_DRIVER", "softpipe")
+	// (opengl32.dll shipped next to the EXE) is used; its default llvmpipe
+	// backend is fast (LLVM JIT). Set GALLIUM_DRIVER=softpipe in the
+	// environment to opt into the slower pure-software backend instead. Real
+	// GPU drivers ignore this Mesa-specific variable.
 
 	root := "."
 	if wd, err := os.Getwd(); err == nil && wd != "" {

@@ -61,11 +61,33 @@ Write-Host "OK: gcc installed"
 
 # --- 3. Mesa software OpenGL --------------------------------------------
 Write-Step "3/8 Mesa software OpenGL (UI fallback for machines without GPU)"
-& $bash -lc "pacman -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-mesa" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "pacman failed to install Mesa."
+$toolsMesa = Join-Path $root "tools\mesa"
+New-Item -ItemType Directory -Force -Path $toolsMesa | Out-Null
+if ((Test-Path (Join-Path $toolsMesa "opengl32.dll")) -and (Test-Path (Join-Path $toolsMesa "libgallium_wgl.dll"))) {
+    Write-Host "OK: mesa DLLs already present"
+} else {
+    Write-Host "Downloading the official mesa-dist-win release..."
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest" -TimeoutSec 60
+    $url = ($rel.assets | Where-Object { $_.name -like "*release-mingw.7z" }).browser_download_url
+    if (-not $url) {
+        throw "mesa-dist-win release-mingw.7z not found in release $($rel.tag_name)."
+    }
+    $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+    if (-not (Test-Path $sevenZip)) {
+        choco install 7zip -y --no-progress
+    }
+    $arch = Join-Path $env:TEMP "mesa.7z"
+    $ext = Join-Path $env:TEMP "mesa-ext"
+    Invoke-WebRequest -Uri $url -OutFile $arch -TimeoutSec 900
+    if (Test-Path $ext) { Remove-Item -Recurse -Force $ext }
+    & $sevenZip x $arch "-o$ext" -y | Out-Null
+    $x64 = Get-ChildItem $ext -Recurse -Directory -Filter "x64" | Select-Object -First 1
+    if (-not $x64) {
+        throw "x64 folder not found in the mesa archive."
+    }
+    Copy-Item (Join-Path $x64.FullName "opengl32.dll"), (Join-Path $x64.FullName "libgallium_wgl.dll") $toolsMesa -Force
+    Write-Host "OK: mesa $($rel.tag_name) installed in tools/mesa"
 }
-Write-Host "OK: mesa installed (DLLs are copied to dist/ during the build)"
 
 # --- 4. Inno Setup -------------------------------------------------------
 Write-Step "4/8 Inno Setup 6 (installer compiler)"
