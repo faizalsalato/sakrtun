@@ -24,7 +24,7 @@ if (Test-Path $staging) {
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
 Get-ChildItem $dist -File | ForEach-Object {
-    if ($_.Name -notlike "*.zip") {
+    if ($_.Name -notlike "*.zip" -and $_.Name -notlike "SAKRTUN-Setup-*.exe") {
         Copy-Item -Force $_.FullName $staging
     }
 }

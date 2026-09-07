@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestEffectiveTunDNS(t *testing.T) {
 	p := Profile{Tun: TunConfig{DNS: []string{"1.1.1.1", "8.8.8.8"}}}
@@ -34,5 +37,28 @@ func TestValidateCustomDNS(t *testing.T) {
 		if err := Validate(p); err == nil {
 			t.Fatalf("invalid servers %v accepted", servers)
 		}
+	}
+}
+
+func TestProfileExtensionAndLegacyMagic(t *testing.T) {
+	if ProfileExtension != ".sakr" {
+		t.Fatalf("ProfileExtension = %q, want .sakr", ProfileExtension)
+	}
+	// Round-trip with the new format.
+	p := Profile{Name: "x", Mode: ModeDirect, SSH: SSHConfig{Host: "h", Port: 22, Username: "u", Password: "p"}, Local: LocalConfig{SocksPort: 1080}}
+	b, err := EncodeProfileFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(b, []byte(profileMagic)) {
+		t.Fatalf("new profile must start with %q", profileMagic)
+	}
+	if _, err := DecodeProfileFile(b); err != nil {
+		t.Fatalf("decode new: %v", err)
+	}
+	// Legacy magic (old .srpc files) must still decode.
+	legacy := append([]byte(profileMagicLegacy), b[len(profileMagic):]...)
+	if _, err := DecodeProfileFile(legacy); err != nil {
+		t.Fatalf("decode legacy: %v", err)
 	}
 }

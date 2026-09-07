@@ -2,7 +2,7 @@
 
 SAKR TUN is a native desktop tunnel client for Windows and Linux. It provides offline profile management, SSH-based tunnel modes, embedded TUN routing, optional IPv6, UDPGW support, DNSTT, and Xray integration.
 
-The application uses a native desktop interface. Profiles are created, imported, and exported from the app as `.srpc` files.
+The application uses a native desktop interface. Profiles are created, imported, and exported from the app as `.sakr` files.
 
 ## Features
 
@@ -23,7 +23,7 @@ The application uses a native desktop interface. Profiles are created, imported,
 ## Project folders
 
 ```text
-profiles/          Local offline .srpc profiles
+profiles/          Local offline .sakr profiles
 configs/           Xray configuration files
 tools/xray/        Xray executable location
 tools/wintun/      Wintun DLL source location before embedding
@@ -33,7 +33,7 @@ logs/              Runtime and crash logs
 
 ## Profile format
 
-Profiles use the `.srpc` extension. They are managed by the app UI and stored locally in the `profiles/` folder.
+Profiles use the `.sakr` extension. They are managed by the app UI and stored locally in the `profiles/` folder. Older `.srpc` profiles are still accepted on import.
 
 Xray is the only mode that uses a JSON file directly, because Xray Core requires JSON configuration. The default Xray configuration path is:
 

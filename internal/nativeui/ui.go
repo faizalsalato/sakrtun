@@ -234,7 +234,7 @@ func (u *UI) sidebar() fyne.CanvasObject {
 	updateBtn := widget.NewButtonWithIcon("Update app", theme.ViewRefreshIcon(), u.updateApp)
 	buttons := container.NewGridWithColumns(2, newBtn, deleteBtn, importBtn, exportBtn, linkBtn, installBtn, updateBtn)
 
-	emptyHint := widget.NewLabel("Create or import a .srpc profile to start.")
+	emptyHint := widget.NewLabel("Create or import a .sakr profile to start.")
 	emptyHint.Wrapping = fyne.TextWrapWord
 	emptyHint.Importance = widget.LowImportance
 
@@ -833,7 +833,7 @@ func (u *UI) saveProfile() {
 	u.current = saved
 	u.loadProfiles()
 	u.setProfile(saved)
-	dialog.ShowInformation("Saved", "Profile saved as .srpc", u.win)
+	dialog.ShowInformation("Saved", "Profile saved as .sakr", u.win)
 }
 
 func (u *UI) deleteProfile() {

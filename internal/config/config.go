@@ -32,8 +32,11 @@ const (
 )
 
 const (
-	ProfileExtension = ".srpc"
-	profileMagic     = "SRPC\x01"
+	ProfileExtension = ".sakr"
+	profileMagic     = "SAKR\x01"
+	// profileMagicLegacy is the magic of profiles created by older builds
+	// (extension .srpc). Files with it are still accepted on import/load.
+	profileMagicLegacy = "SRPC\x01"
 )
 
 type Profile struct {
@@ -299,10 +302,14 @@ func EncodeProfileFile(p Profile) ([]byte, error) {
 
 func DecodeProfileFile(b []byte) (Profile, error) {
 	var p Profile
-	if !bytes.HasPrefix(b, []byte(profileMagic)) {
-		return p, errors.New("invalid SocksRevive PC profile file")
+	if !bytes.HasPrefix(b, []byte(profileMagic)) && !bytes.HasPrefix(b, []byte(profileMagicLegacy)) {
+		return p, errors.New("invalid SAKR TUN profile file")
 	}
-	gz, err := gzip.NewReader(bytes.NewReader(b[len(profileMagic):]))
+	off := len(profileMagic)
+	if bytes.HasPrefix(b, []byte(profileMagicLegacy)) {
+		off = len(profileMagicLegacy)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(b[off:]))
 	if err != nil {
 		return p, err
 	}
