@@ -2,7 +2,7 @@
 ; Build with: scripts/build_installer.ps1
 
 #define MyAppName "SAKR TUN"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "SAKR"
 #define MyAppExeName "SAKRTUN.exe"
 
@@ -32,7 +32,7 @@ CloseApplicationsFilter={#MyAppExeName}
 RestartApplications=yes
 
 [Files]
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.zip"
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.zip,SAKRTUN-Setup-*.exe"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checkedonce

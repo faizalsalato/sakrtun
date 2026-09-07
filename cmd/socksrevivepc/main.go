@@ -15,10 +15,14 @@ func main() {
 	debug.SetTraceback("all")
 	// Some virtual machines and remote sessions have no hardware OpenGL
 	// driver. On those machines the bundled Mesa software renderer
-	// (opengl32.dll shipped next to the EXE) is used; its default llvmpipe
-	// backend is fast (LLVM JIT). Set GALLIUM_DRIVER=softpipe in the
-	// environment to opt into the slower pure-software backend instead. Real
-	// GPU drivers ignore this Mesa-specific variable.
+	// (opengl32.dll shipped next to the EXE) is used. Force its fast llvmpipe
+	// backend: it is the reliable default for machines without a GPU, while
+	// this Mesa build's own default (D3D12) aborts on GPU-less systems. Real
+	// GPU drivers ignore this Mesa-specific variable; set GALLIUM_DRIVER to
+	// override (for example softpipe).
+	if os.Getenv("GALLIUM_DRIVER") == "" {
+		_ = os.Setenv("GALLIUM_DRIVER", "llvmpipe")
+	}
 
 	root := "."
 	if wd, err := os.Getwd(); err == nil && wd != "" {
