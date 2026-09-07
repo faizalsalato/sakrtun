@@ -1,8 +1,30 @@
 # SAKR TUN
 
-SAKR TUN is a native desktop tunnel client for Windows and Linux. It provides offline profile management, SSH-based tunnel modes, embedded TUN routing, optional IPv6, UDPGW support, DNSTT, and Xray integration.
+SAKR TUN is a native desktop tunnel client for Windows and Linux. It provides offline profile management, SSH-based tunnel modes, embedded TUN routing, optional IPv6, UDPGW support, DNSTT, Xray, and OpenVPN integration.
 
-The application uses a native desktop interface. Profiles are created, imported, and exported from the app as `.sakr` files.
+The application uses a native desktop interface. Profiles are created, imported, and exported from the app as `.sakr` files (older `.srpc` profiles are still accepted on import).
+
+## Download and install
+
+Download the latest release from:
+
+```text
+https://github.com/faizalsalato/sakrtun/releases/latest
+```
+
+Each release ships a single installer executable:
+
+```text
+SAKRTUN-Setup-<version>.exe
+```
+
+Run it (double-click), accept the administrator prompt, and the app installs to:
+
+```text
+C:\Program Files\SAKR TUN
+```
+
+with Start Menu and Desktop shortcuts, plus an uninstaller registered in Add/Remove Programs.
 
 ## Features
 
@@ -13,21 +35,32 @@ The application uses a native desktop interface. Profiles are created, imported,
 | SSL/TLS SSH | Wraps the SSH tunnel in TLS/SNI. |
 | Payload + SSL | Uses TLS/SNI, payload injection, and SSH together. |
 | DNSTT + SSH | Uses the embedded DNSTT client and then connects SSH through the local DNSTT endpoint. |
-| Xray Core | Starts an external Xray executable and routes traffic through its local SOCKS inbound. |
+| Xray Core | Starts the bundled Xray executable (or your own) and routes traffic through its local SOCKS inbound. |
+| OpenVPN | Runs the bundled OpenVPN process with your `.ovpn` config; OpenVPN owns the adapter and routes. |
 | TUN mode | Routes system traffic through the tunnel using embedded tun2socks. |
 | UDPGW | Enables UDP traffic for SSH-based modes when a server-side UDPGW service is available. |
 | IPv6 | Optional IPv6 routing and IPv6 leak protection. |
 | Reconnect | Automatically reconnects after tunnel loss when enabled in the profile. |
 | Proxy rotation | Tries multiple proxy hosts until one completes the full tunnel handshake. |
+| Kill switch | Blocks internet whenever the VPN is not connected (only the VPN servers stay reachable). |
+| Custom DNS | Define your own DNS servers for the SOCKS resolver and the TUN adapter. |
+| Share links | Import `vless://`, `trojan://`, `ss://` and `vmess://` links; the Xray JSON config is generated automatically. |
+| Manual Xray JSON | Create the Xray configuration directly in the UI (with template and load-from-file). |
+| Tool updates | Update the bundled Xray and OpenVPN to their latest releases from inside the app. |
+| Self-update | "Update app" downloads the latest installer from GitHub and updates silently. |
 
 ## Project folders
 
 ```text
 profiles/          Local offline .sakr profiles
-configs/           Xray configuration files
-tools/xray/        Xray executable location
+configs/           Xray configuration files and global settings
+tools/xray/        Bundled Xray executable + geoip/geosite data
+tools/openvpn/     Bundled OpenVPN executable + DLLs
+tools/dnstt/       External DNSTT fallback location
 tools/wintun/      Wintun DLL source location before embedding
-dist/              Build output
+installer/         Inno Setup script (setup.iss)
+scripts/           Build, logo, release and diagnostics scripts
+dist/              Build output (SAKRTUN.exe, installer)
 logs/              Runtime and crash logs
 ```
 
@@ -41,6 +74,8 @@ Xray is the only mode that uses a JSON file directly, because Xray Core requires
 configs/xray.json
 ```
 
+You can also create the Xray configuration manually in the Xray tab (JSON editor with a VLESS template), or import share links that generate it automatically.
+
 ## Windows build requirements
 
 Install:
@@ -48,30 +83,35 @@ Install:
 - Go 1.22 or newer
 - MSYS2 UCRT64 GCC
 - MSYS2 binutils, for `windres.exe`
+- MSYS2 Mesa (optional, used for the software OpenGL DLLs shipped beside the EXE)
 
 Automatic setup:
 
 ```powershell
-cd SocksRevivePC
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_compiler_msys2.ps1
 ```
 
 After setup finishes, open a new PowerShell window and build:
 
 ```powershell
-cd SocksRevivePC
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
+
+Then build the installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 ```
 
 Run:
 
 ```powershell
-.\dist\SocksRevivePC.exe
+.\dist\SAKRTUN.exe
 ```
 
-The Windows executable includes a UAC manifest, so Windows should ask for Administrator permission when the app starts. Administrator permission is required for Wintun, DNS changes, TUN addresses, and system routes.
+The Windows executable includes a UAC manifest, so Windows asks for Administrator permission when the app starts. Administrator permission is required for Wintun, DNS changes, TUN addresses, and system routes.
 
-The normal Windows build is GUI-only. Helper processes such as route configuration, DNS configuration, Xray, and legacy helper binaries are started without visible console windows.
+The normal Windows build is GUI-only. Helper processes such as route configuration, DNS configuration, Xray, and OpenVPN are started without visible console windows.
 
 Optional debug build:
 
@@ -93,7 +133,6 @@ sudo apt install -y golang gcc libgl1-mesa-dev xorg-dev
 Build and run:
 
 ```bash
-cd SocksRevivePC
 chmod +x scripts/build_linux.sh
 ./scripts/build_linux.sh
 ./dist/socksrevivepc
@@ -107,32 +146,25 @@ sudo ./dist/socksrevivepc
 
 ## Wintun setup for Windows TUN mode
 
-Windows TUN mode requires the official signed `wintun.dll`.
-
-For 64-bit Windows, place the DLL here before building:
-
-```text
-tools/wintun/amd64/wintun.dll
-```
-
-Embed it into the final executable:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\embed_wintun_from_tools.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
-```
-
-After embedding, the app extracts the DLL automatically at runtime. Users do not need to manually place `wintun.dll` beside the executable.
+Windows TUN mode uses the official signed `wintun.dll`, which is **embedded into the executable** at build time (from `internal/wintunloader/assets`). The app extracts it automatically at runtime; users do not need to place any DLL manually.
 
 Fallback lookup locations are also supported:
 
 ```text
-Same folder as SocksRevivePC.exe
+Same folder as SAKRTUN.exe
 tools/wintun/amd64/wintun.dll
 PATH
 ```
 
 Use only the official signed Wintun DLL from the WireGuard/Wintun distribution.
+
+## OpenVPN notes
+
+The OpenVPN tab runs the bundled `tools/openvpn/openvpn.exe` (auto-detected; leave the Executable field empty). The app passes `--config <file>` and, when the profile has credentials, writes a temporary auth-user-pass file that is removed when the tunnel stops.
+
+The OpenVPN process creates and manages its own adapter and routes. The TAP-Windows6/wintun **drivers** must be installed on the machine (they ship with the official OpenVPN installer and are not bundled).
+
+The bundled copy is updated with the "Update OpenVPN" button (downloads the official MSI, installs it silently, and refreshes `tools/openvpn`).
 
 ## TUN settings
 
@@ -164,6 +196,26 @@ For route-all mode on Windows, the app installs split default routes through Win
 ```
 
 Only the active proxy from a rotation list is bypassed. The full proxy list is not added to the route table.
+
+## Kill switch
+
+The Kill Switch toggle (top bar) blocks all internet access whenever the VPN is not connected:
+
+- Disconnected: default routes (IPv4 and IPv6) are removed; only the VPN servers of the profile stay reachable so the tunnel can reconnect.
+- Connecting: the block stays active.
+- Connected with TUN route-all (or OpenVPN): the physical routes are restored and the VPN owns the routing.
+- Disconnecting: the block is re-applied immediately.
+
+The state is persisted in `configs/settings.json` and re-applied on startup. Requires administrator rights.
+
+## Custom DNS
+
+The Main tab has a "Custom DNS servers" field (comma separated, IPs or hostnames, optionally with `:port`). When set, these servers are used by:
+
+- the local SOCKS DNS-over-SSH resolver (all SSH modes), and
+- the TUN adapter (overriding the TUN tab values).
+
+Leave empty for the defaults (`1.1.1.1`, `8.8.8.8`).
 
 ## IPv6 settings
 
@@ -254,12 +306,7 @@ External DNSTT executable fields are kept only for compatibility with older depl
 
 ## Xray setup
 
-Place Xray here:
-
-```text
-tools/xray/xray.exe   # Windows
-tools/xray/xray       # Linux/macOS
-```
+The official Xray Windows build is bundled in `tools/xray/xray.exe` (with `geoip.dat` and `geosite.dat`), so the Executable field can stay empty. It is updated with the "Update Xray" button.
 
 Edit the Xray configuration file:
 
@@ -267,13 +314,15 @@ Edit the Xray configuration file:
 configs/xray.json
 ```
 
+or create the configuration manually in the Xray tab (JSON editor), or use "Import link" with `vless://`, `trojan://`, `ss://` or `vmess://` share links.
+
 The app expects Xray to expose a local SOCKS inbound. Default:
 
 ```text
 127.0.0.1:10808
 ```
 
-The SOCKS host and port in the UI must match the inbound configured in `configs/xray.json`.
+The SOCKS host and port in the UI must match the inbound configured in the JSON.
 
 ## Payload syntax
 
@@ -393,21 +442,34 @@ When IPv6 routing or IPv6 leak protection is enabled, expected IPv6 routes are:
 8000::/1 through Wintun
 ```
 
-## Distribution notes
+## Releases and self-update
 
-For normal Windows users, distribute:
-
-```text
-dist/SocksRevivePC.exe
-```
-
-Do not distribute debug builds unless support logs are needed.
-
-If Xray mode is required, include the Xray executable and configuration:
+Releases live at:
 
 ```text
-tools/xray/xray.exe
-configs/xray.json
+https://github.com/faizalsalato/sakrtun/releases
 ```
 
-If Wintun is not embedded, include the official signed DLL beside the EXE or in the supported tools folder.
+Each release carries a single installer asset:
+
+```text
+SAKRTUN-Setup-<version>.exe
+```
+
+Publishing a new version:
+
+1. Bump `internal/app/version.go` (e.g. `1.0.2`).
+2. Bump `#define MyAppVersion` in `installer/setup.iss`.
+3. Build:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -NoTidy
+   powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
+   ```
+4. Create a GitHub release with tag `v1.0.2` and attach `dist\SAKRTUN-Setup-1.0.2.exe`.
+
+Users with the app installed click **Update app**: it downloads the installer from the latest release, runs it silently, and the installer closes and restarts the app automatically.
+
+The bundled tools are updated independently from inside the app:
+
+- **Update Xray** (Xray tab): downloads the latest Xray release and replaces `tools/xray`.
+- **Update OpenVPN** (OpenVPN tab): downloads the official MSI, installs it silently (updates drivers), and refreshes `tools/openvpn`.
