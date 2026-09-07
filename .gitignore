@@ -20,6 +20,7 @@ tools/wintun/**/*.dll
 
 # User data / secrets
 profiles/*.srpc
+profiles/*.sakr
 configs/settings.json
 
 # Temp files
