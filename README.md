@@ -85,7 +85,24 @@ Install:
 - MSYS2 binutils, for `windres.exe`
 - MSYS2 Mesa (optional, used for the software OpenGL DLLs shipped beside the EXE)
 
-Automatic setup:
+### One-command project initialization
+
+From a fresh clone, run the init script; it installs everything that is missing
+(Go, MSYS2 toolchain, Mesa, Inno Setup), downloads the bundled tools (Xray,
+OpenVPN), regenerates the logo and builds the exe and the installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\init_project.ps1
+```
+
+It is idempotent (safe to re-run). Use `-SkipBuild` to only prepare the
+environment without building:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\init_project.ps1 -SkipBuild
+```
+
+Automatic setup (toolchain only):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_compiler_msys2.ps1
