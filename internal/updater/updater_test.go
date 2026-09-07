@@ -1,8 +1,6 @@
 package updater
 
 import (
-	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -28,43 +26,5 @@ func TestXrayAssetSuffix(t *testing.T) {
 	}
 	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" && got != "windows-64.zip" {
 		t.Fatalf("windows/amd64 suffix = %q", got)
-	}
-}
-
-func TestReleaseSourceDir(t *testing.T) {
-	dir := t.TempDir()
-	// Flat layout stays as-is.
-	if got := releaseSourceDir(dir); got != dir {
-		t.Fatalf("flat layout = %q", got)
-	}
-	// Single top-level folder is stripped.
-	inner := filepath.Join(dir, "SAKRTUN-windows-amd64")
-	if err := os.MkdirAll(inner, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got := releaseSourceDir(dir); got != inner {
-		t.Fatalf("nested layout = %q, want %q", got, inner)
-	}
-}
-
-func TestCopyTreeMerge(t *testing.T) {
-	src := t.TempDir()
-	dst := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(src, "tools", "xray"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "SAKRTUN.exe"), []byte("new"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "tools", "xray", "xray.exe"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := copyTreeMerge(src, dst); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []string{"SAKRTUN.exe", filepath.Join("tools", "xray", "xray.exe")} {
-		if _, err := os.Stat(filepath.Join(dst, p)); err != nil {
-			t.Fatalf("missing %s after merge: %v", p, err)
-		}
 	}
 }

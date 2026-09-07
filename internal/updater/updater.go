@@ -159,15 +159,6 @@ func openvpnExeName() string {
 
 const appReleaseRepo = "faizalsalato/sakrtun"
 
-// appReleaseAssetNames are the accepted zip asset names for Windows releases
-// in the GitHub release page (compared case-insensitively).
-var appReleaseAssetNames = []string{
-	"SAKRTUN-windows-amd64.zip",
-	"sakrtun-windows-amd64.zip",
-	"SAKRTUN-windows-64.zip",
-	"sakrtun-windows-64.zip",
-}
-
 // LatestAppVersion returns the latest app version from the GitHub releases of
 // faizalsalato/sakrtun (tag without the leading "v").
 func LatestAppVersion() (string, error) {
@@ -178,11 +169,9 @@ func LatestAppVersion() (string, error) {
 	return strings.TrimPrefix(r.TagName, "v"), nil
 }
 
-// UpdateApp downloads the latest app release zip from GitHub and merges its
-// files over the app folder (exe, DLLs, tools, configs). On Windows the
-// running executable cannot be overwritten in place, so it is renamed to
-// SAKRTUN.exe.old first and removed on the next start. The app must be
-// restarted to run the new version.
+// UpdateApp downloads the latest SAKRTUN-Setup installer from GitHub and runs
+// it silently. The Inno Setup installer updates the existing installation,
+// closing and restarting the app automatically when needed.
 func UpdateApp(root, currentVersion string, log Logger) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("app auto-update is only supported on Windows")
@@ -194,101 +183,35 @@ func UpdateApp(root, currentVersion string, log Logger) (string, error) {
 	ver := strings.TrimPrefix(r.TagName, "v")
 	var url string
 	for _, a := range r.Assets {
-		for _, n := range appReleaseAssetNames {
-			if strings.EqualFold(a.Name, n) {
-				url = a.URL
-				break
-			}
-		}
-		if url != "" {
+		n := strings.ToLower(a.Name)
+		if strings.HasPrefix(n, "sakrtun-setup-") && strings.HasSuffix(n, ".exe") {
+			url = a.URL
 			break
 		}
 	}
 	if url == "" {
-		return "", fmt.Errorf("no app release zip found in release %s (expected one of %v)", r.TagName, appReleaseAssetNames)
+		return "", fmt.Errorf("no SAKRTUN-Setup asset found in release %s", r.TagName)
 	}
 	tmp, err := os.MkdirTemp("", "sakr-app")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
-	zipPath := filepath.Join(tmp, "app.zip")
+	setupPath := filepath.Join(tmp, "SAKRTUN-Setup.exe")
 	if log != nil {
 		log("info", "app update: downloading %s ...", url)
 	}
-	if err := downloadFile(url, zipPath); err != nil {
+	if err := downloadFile(url, setupPath); err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
 	}
-	extract := filepath.Join(tmp, "ext")
-	if err := os.MkdirAll(extract, 0o755); err != nil {
-		return "", err
-	}
-	if err := unzip(zipPath, extract); err != nil {
-		return "", fmt.Errorf("extract failed: %w", err)
-	}
-	src := releaseSourceDir(extract)
-	if err := replaceAppFiles(src, root, log); err != nil {
-		return "", err
-	}
-	// Old renamed executable is left for cleanup at the next start (it is
-	// still locked by this running process).
 	if log != nil {
-		log("info", "app updated to %s; restart the app to apply", ver)
+		log("info", "app update: installing %s silently (the app restarts automatically) ...", ver)
+	}
+	out, err := exec.Command(setupPath, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("installer failed: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return ver, nil
-}
-
-// releaseSourceDir strips a single top-level folder from an extracted zip, so
-// both "flat" zips and GitHub's "folder inside zip" layout work.
-func releaseSourceDir(extract string) string {
-	entries, err := os.ReadDir(extract)
-	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
-		return extract
-	}
-	return filepath.Join(extract, entries[0].Name())
-}
-
-// replaceAppFiles merges the extracted release files into the app folder.
-func replaceAppFiles(src, root string, log Logger) error {
-	// Rename the running executable so the new one can be written.
-	if exe := filepath.Join(root, "SAKRTUN.exe"); fileExists(exe) {
-		old := exe + ".old"
-		_ = os.Remove(old)
-		if err := os.Rename(exe, old); err != nil && log != nil {
-			log("warn", "cannot rename the running executable: %v", err)
-		}
-	}
-	return copyTreeMerge(src, root)
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// copyTreeMerge copies every file under src into dst, keeping the relative
-// paths and creating directories as needed.
-func copyTreeMerge(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		return copyFile(path, target)
-	})
 }
 
 func InstalledOpenVPNVersion(root string) string {

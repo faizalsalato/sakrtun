@@ -2,7 +2,7 @@
 ; Build with: scripts/build_installer.ps1
 
 #define MyAppName "SAKR TUN"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "SAKR"
 #define MyAppExeName "SAKRTUN.exe"
 
@@ -25,6 +25,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=..\cmd\socksrevivepc\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
+; During silent self-updates the installer closes the running app and
+; relaunches it when the update finishes.
+CloseApplications=yes
+CloseApplicationsFilter={#MyAppExeName}
+RestartApplications=yes
 
 [Files]
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.zip"
