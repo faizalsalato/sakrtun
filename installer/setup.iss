@@ -2,7 +2,7 @@
 ; Build with: scripts/build_installer.ps1
 
 #define MyAppName "SAKR TUN"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "SAKR"
 #define MyAppExeName "SAKRTUN.exe"
 

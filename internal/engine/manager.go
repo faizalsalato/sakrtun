@@ -67,6 +67,12 @@ func (m *Manager) AddLog(level, format string, args ...any) {
 	m.logger.Add(level, format, args...)
 }
 
+// ClearLogs removes all in-memory log entries (used by the "Clear logs"
+// button in the Logs tab).
+func (m *Manager) ClearLogs() {
+	m.logger.Clear()
+}
+
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()

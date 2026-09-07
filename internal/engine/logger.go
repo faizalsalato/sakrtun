@@ -48,3 +48,11 @@ func (l *Logger) Since(id int64) []LogEntry {
 	}
 	return out
 }
+
+// Clear removes all stored entries. The ID counter is kept monotonic so
+// polling clients do not receive old entries again.
+func (l *Logger) Clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = nil
+}

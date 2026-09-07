@@ -164,7 +164,10 @@ func Run(core *coreapp.App) {
 		u.core.Engine.Stop()
 		w.Close()
 	})
-	w.CenterOnScreen()
+	// Do not call w.CenterOnScreen(): it makes Fyne query the monitor video
+	// mode, and on disconnected RDP sessions there is no monitor, which
+	// panics (nil video mode) and closes the app. The Win32 maximize below
+	// already places the window on the normal screen area.
 	w.ShowAndRun()
 }
 
@@ -639,7 +642,25 @@ func (u *UI) tunSection() fyne.CanvasObject {
 }
 
 func (u *UI) logsSection() fyne.CanvasObject {
-	return section("Logs", "Runtime messages from SSH, DNSTT, Xray, TUN and routing.", u.logScroller)
+	clearBtn := widget.NewButtonWithIcon("Clear logs", theme.DeleteIcon(), u.clearLogs)
+	top := container.NewBorder(nil, nil, nil, clearBtn, widget.NewLabel(""))
+	content := container.NewBorder(top, nil, nil, nil, u.logScroller)
+	return section("Logs", "Runtime messages from SSH, DNSTT, Xray, TUN and routing.", content)
+}
+
+// clearLogs empties the Logs tab, the in-memory engine log and the runtime
+// and crash log files on disk.
+func (u *UI) clearLogs() {
+	u.core.Engine.ClearLogs()
+	u.logText = ""
+	u.logView.SetText("No logs yet.")
+	if u.logScroller != nil {
+		u.logScroller.ScrollToTop()
+	}
+	logDir := filepath.Join(u.core.Root, "logs")
+	for _, name := range []string{"runtime.log", "crash.log"} {
+		_ = os.Truncate(filepath.Join(logDir, name), 0)
+	}
 }
 
 func (u *UI) newProfile() {
