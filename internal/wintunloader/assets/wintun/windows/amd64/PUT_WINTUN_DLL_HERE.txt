@@ -1,0 +1,6 @@
+Put the official amd64 wintun.dll here and rebuild if you want SocksRevivePC.exe to embed Wintun internally.
+Expected filename:
+
+wintun.dll
+
+Use the signed DLL from the official Wintun package.

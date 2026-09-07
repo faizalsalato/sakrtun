@@ -1,0 +1,27 @@
+# Build output
+dist/
+
+# Logs
+logs/*.log
+build.log
+
+# Generated Windows resource (recreated by windres in scripts/build_windows.ps1)
+cmd/socksrevivepc/admin_windows.syso
+
+# Bundled tool binaries (downloaded at build time; shipped via the release zip)
+tools/xray/*.exe
+tools/xray/*.dat
+tools/openvpn/*.exe
+tools/openvpn/*.dll
+tools/openvpn/*.reg
+tools/dnstt/*.exe
+tools/dnstt/*.dll
+tools/wintun/**/*.dll
+
+# User data / secrets
+profiles/*.srpc
+configs/settings.json
+
+# Temp files
+*.old
+*.tmp

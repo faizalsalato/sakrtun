@@ -1,0 +1,6 @@
+// Windows application manifest resource.
+// RT_MANIFEST is resource type 24.
+1 24 "cmd/socksrevivepc/socksrevivepc.exe.manifest"
+
+// Application icon (shown by Explorer and the taskbar).
+1 ICON "cmd/socksrevivepc/logo.ico"

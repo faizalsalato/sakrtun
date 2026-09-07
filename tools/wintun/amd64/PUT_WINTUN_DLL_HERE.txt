@@ -1,0 +1,4 @@
+Put official signed amd64 wintun.dll in this folder if you want either:
+
+1. Runtime fallback: build script copies it beside dist/SocksRevivePC.exe.
+2. Internal/self-contained EXE: run scripts/embed_wintun_from_tools.ps1 before build.

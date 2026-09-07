@@ -1,0 +1,6 @@
+Put the official arm64 wintun.dll here and rebuild if you build GOARCH=arm64.
+Expected filename:
+
+wintun.dll
+
+Use the signed DLL from the official Wintun package.
