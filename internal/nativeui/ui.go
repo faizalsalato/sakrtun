@@ -27,7 +27,6 @@ import (
 	coreapp "socksrevivepc/internal/app"
 	"socksrevivepc/internal/config"
 	"socksrevivepc/internal/crash"
-	"socksrevivepc/internal/installer"
 	"socksrevivepc/internal/updater"
 	"socksrevivepc/internal/xraylink"
 )
@@ -230,9 +229,8 @@ func (u *UI) sidebar() fyne.CanvasObject {
 	importBtn := widget.NewButtonWithIcon("Import", theme.FolderOpenIcon(), u.importProfile)
 	exportBtn := widget.NewButtonWithIcon("Export", theme.DocumentSaveIcon(), u.exportProfile)
 	linkBtn := widget.NewButtonWithIcon("Import link", theme.DocumentCreateIcon(), u.importLink)
-	installBtn := widget.NewButtonWithIcon("Install", theme.DownloadIcon(), u.installToProgramFiles)
 	updateBtn := widget.NewButtonWithIcon("Update app", theme.ViewRefreshIcon(), u.updateApp)
-	buttons := container.NewGridWithColumns(2, newBtn, deleteBtn, importBtn, exportBtn, linkBtn, installBtn, updateBtn)
+	buttons := container.NewGridWithColumns(2, newBtn, deleteBtn, importBtn, exportBtn, linkBtn, updateBtn)
 
 	emptyHint := widget.NewLabel("Create or import a .sakr profile to start.")
 	emptyHint.Wrapping = fyne.TextWrapWord
@@ -919,31 +917,6 @@ func (u *UI) confirmToolUpdate(tool, installed, latest string, run func(updater.
 			})
 		})
 	}, u.win)
-}
-
-// installToProgramFiles copies the app into C:\Program Files\SAKR TUN and
-// creates Start Menu and Desktop shortcuts.
-func (u *UI) installToProgramFiles() {
-	dialog.ShowConfirm("Install to Program Files",
-		"Install SAKR TUN into:\n\nC:\\Program Files\\SAKR TUN\n\nand create Start Menu and Desktop shortcuts?",
-		func(ok bool) {
-			if !ok {
-				return
-			}
-			prog := dialog.NewProgressInfinite("Installing", "Copying files...", u.win)
-			prog.Show()
-			crash.Go(u.core.Root, func() {
-				dest, err := installer.InstallToProgramFiles(u.core.Root)
-				fyne.Do(func() {
-					prog.Hide()
-					if err != nil {
-						dialog.ShowError(err, u.win)
-						return
-					}
-					dialog.ShowInformation("Installed", "SAKR TUN installed at:\n\n"+dest+"\n\nStart Menu and Desktop shortcuts were created.", u.win)
-				})
-			})
-		}, u.win)
 }
 
 // updateApp checks the faizalsalato/sakrtun GitHub releases and, when a newer
