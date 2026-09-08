@@ -160,6 +160,48 @@ if (Test-Path (Join-Path $toolsO "openvpn.exe")) {
     Write-Host "OK: openvpn installed in tools/openvpn"
 }
 
+# --- 6b. OpenVPN virtual adapter drivers (ovpn-dco + tap-windows6) ------------
+Write-Step "6b/9 OpenVPN adapter drivers (ovpn-dco, tap-windows6)"
+$drv = Join-Path $toolsO "driver"
+$dcoDir = Join-Path $drv "ovpn-dco"
+$tapDir = Join-Path $drv "tap0901"
+if (-not (Test-Path (Join-Path $dcoDir "ovpndco.inf"))) {
+    New-Item -ItemType Directory -Force -Path $dcoDir | Out-Null
+    Write-Host "Downloading the OpenVPN MSI to extract the ovpn-dco driver..."
+    $msi = Join-Path $env:TEMP "openvpn-drv.msi"
+    $msiUrl = "https://swupdate.openvpn.org/community/releases/OpenVPN-$ver-I001-amd64.msi"
+    if (-not (Test-Path $msi)) {
+        Invoke-WebRequest -Uri $msiUrl -OutFile $msi -TimeoutSec 600
+    }
+    $dcoExt = Join-Path $env:TEMP "openvpn-dco-ext"
+    if (Test-Path $dcoExt) { Remove-Item -Recurse -Force $dcoExt }
+    & 'C:\Program Files\7-Zip\7z.exe' x $msi "-o$dcoExt" -y '*ovpndco*' | Out-Null
+    foreach ($f in @('ovpndco.inf','ovpndco_nx20.cat','ovpndco_nx20.sys','ovpndco_nx21.cat','ovpndco_nx21.inf','ovpndco_nx21.sys')) {
+        $src = Get-ChildItem $dcoExt -Filter "$f.*" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($src) { Copy-Item $src.FullName (Join-Path $dcoDir $f) -Force }
+    }
+    # The INF references ovpn-dco.sys / ovpn-dco.cat; the nx20 build covers
+    # Windows 10 / Server builds.
+    if (Test-Path (Join-Path $dcoDir "ovpndco_nx20.sys")) { Copy-Item (Join-Path $dcoDir "ovpndco_nx20.sys") (Join-Path $dcoDir "ovpn-dco.sys") -Force }
+    if (Test-Path (Join-Path $dcoDir "ovpndco_nx20.cat")) { Copy-Item (Join-Path $dcoDir "ovpndco_nx20.cat") (Join-Path $dcoDir "ovpn-dco.cat") -Force }
+    Write-Host "OK: ovpn-dco driver in tools/openvpn/driver/ovpn-dco"
+} else {
+    Write-Host "OK: ovpn-dco driver already present"
+}
+if (-not (Test-Path (Join-Path $tapDir "OemVista.inf"))) {
+    New-Item -ItemType Directory -Force -Path $tapDir | Out-Null
+    Write-Host "Downloading the TAP-Windows6 driver..."
+    $tapExe = Join-Path $env:TEMP "tap-windows.exe"
+    Invoke-WebRequest -Uri "https://build.openvpn.net/downloads/releases/tap-windows-9.24.7-I601-Win10.exe" -OutFile $tapExe -TimeoutSec 600
+    $tapExt = Join-Path $env:TEMP "tap-windows-ext"
+    if (Test-Path $tapExt) { Remove-Item -Recurse -Force $tapExt }
+    & 'C:\Program Files\7-Zip\7z.exe' x $tapExe "-o$tapExt" -y 'driver' | Out-Null
+    Copy-Item (Join-Path $tapExt "driver\*") $tapDir -Force
+    Write-Host "OK: tap-windows6 driver in tools/openvpn/driver/tap0901"
+} else {
+    Write-Host "OK: tap-windows6 driver already present"
+}
+
 # --- 7. Proxifier ------------------------------------------------------------
 Write-Step "7/9 Proxifier (bundled, optional)"
 $toolsP = Join-Path $root "tools\proxifier"

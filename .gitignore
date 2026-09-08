@@ -33,3 +33,6 @@ configs/xray-profile-*.json
 configs/proxifier-profile-*.ppx
 tools/proxifier/Profiles/
 tools/proxifier/Settings.ini
+tools/openvpn/driver/*.sys
+tools/openvpn/driver/*.inf
+tools/openvpn/driver/*.cat

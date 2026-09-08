@@ -55,6 +55,13 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 	if err := ensureOpenVPNInteractiveService(); err != nil && logger != nil {
 		logger.Add("warn", "openvpn interactive service: %v", err)
 	}
+	// OpenVPN 2.7 supports ovpn-dco and tap-windows6 (Wintun support was
+	// removed). Machines without any of those drivers fail with "All
+	// tap-windows6 adapters are currently in use or disabled", so install the
+	// bundled driver and create an adapter when none is present.
+	if err := ensureOpenVPNAdapter(root, logger); err != nil && logger != nil {
+		logger.Add("warn", "openvpn adapter driver: %v", err)
+	}
 
 	proc, err := StartProcessWithReady(ctx, root, "openvpn", exe, args, logger, openVPNReadyLine)
 	if err != nil {
@@ -84,6 +91,65 @@ func ensureOpenVPNInteractiveService() error {
 			return nil
 		}
 		return fmt.Errorf("sc start failed: %v (%s)", err, text)
+	}
+	return nil
+}
+
+// ensureOpenVPNAdapter makes sure the machine has a virtual adapter driver
+// OpenVPN can use (ovpn-dco preferred, tap-windows6 as fallback). OpenVPN 2.7
+// no longer ships these drivers with its MSI, so machines without them fail
+// with "All tap-windows6 adapters are currently in use or disabled". The
+// bundled driver packages live in tools/openvpn/driver; pnputil installs them
+// and tapctl (bundled with OpenVPN) creates the adapter.
+func ensureOpenVPNAdapter(root string, logger *Logger) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	tapctl := filepath.Join(root, "tools", "openvpn", "tapctl.exe")
+	if _, err := os.Stat(tapctl); err != nil {
+		return nil // non-bundled setup - leave it to the system installation
+	}
+	if out, err := exec.Command(tapctl, "list").CombinedOutput(); err == nil {
+		text := string(out)
+		if strings.Contains(text, "ovpn-dco") || strings.Contains(text, "tap0901") {
+			return nil // a usable adapter driver is already present
+		}
+	}
+	// Try the ovpn-dco driver first (recommended by OpenVPN 2.7).
+	dcoInf := filepath.Join(root, "tools", "openvpn", "driver", "ovpn-dco", "ovpndco.inf")
+	if _, err := os.Stat(dcoInf); err == nil {
+		if logger != nil {
+			logger.Add("info", "openvpn: installing the bundled ovpn-dco driver...")
+		}
+		// pnputil reports an error when the package already exists; that is
+		// not a failure - the driver store already has it.
+		_, _ = exec.Command("pnputil.exe", "/add-driver", dcoInf, "/install").CombinedOutput()
+		if out, err := exec.Command(tapctl, "create", "--hwid", "ovpn-dco", "--name", "SAKR TUN DCO").CombinedOutput(); err == nil {
+			if logger != nil {
+				logger.Add("info", "openvpn: ovpn-dco adapter ready")
+			}
+			return nil
+		} else if strings.Contains(strings.ToLower(string(out)), "exists") {
+			return nil
+		}
+	}
+	// Fallback: the legacy TAP-Windows6 driver.
+	tapInf := filepath.Join(root, "tools", "openvpn", "driver", "tap0901", "OemVista.inf")
+	if _, err := os.Stat(tapInf); err != nil {
+		return fmt.Errorf("no bundled OpenVPN driver package found")
+	}
+	if logger != nil {
+		logger.Add("info", "openvpn: installing the bundled TAP-Windows6 driver...")
+	}
+	_, _ = exec.Command("pnputil.exe", "/add-driver", tapInf, "/install").CombinedOutput()
+	if out, err := exec.Command(tapctl, "create", "--hwid", "tap0901", "--name", "OpenVPN TAP-Windows6").CombinedOutput(); err != nil {
+		text := strings.TrimSpace(string(out))
+		if !strings.Contains(strings.ToLower(text), "exists") {
+			return fmt.Errorf("tapctl create: %v (%s)", err, text)
+		}
+	}
+	if logger != nil {
+		logger.Add("info", "openvpn: TAP-Windows6 adapter ready")
 	}
 	return nil
 }

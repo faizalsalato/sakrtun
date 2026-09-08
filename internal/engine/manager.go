@@ -314,8 +314,9 @@ func (m *Manager) Start(p config.Profile) error {
 	}
 	m.logger.Add("info", "profile is connected; local socks=%s tun=%v", socksAddr, p.Tun.Enabled)
 	// In Proxifier mode the local SOCKS proxy is pushed into Proxifier so the
-	// apps are forced through the tunnel without a TUN adapter.
-	if routeModeOf(p) == "proxifier" {
+	// apps are forced through the tunnel without a TUN adapter. OpenVPN routes
+	// through its own adapter, so it never needs Proxifier.
+	if routeModeOf(p) == "proxifier" && p.Mode != config.ModeOpenVPN && socksAddr != "" {
 		if err := m.startProxifier(p, socksAddr); err != nil {
 			m.logger.Add("warn", "proxifier could not be started: %v", err)
 		}
