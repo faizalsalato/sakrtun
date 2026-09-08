@@ -1529,7 +1529,7 @@ const (
 // routeModeTip explains the leak caveats of the proxy modes so users know why
 // some sites may still see the machine's real IP (WebRTC, non-proxied apps).
 func (u *UI) routeModeTip() fyne.CanvasObject {
-	tip := widget.NewLabel("Tip: some sites can still see your real IP in the proxy/Proxifier modes (WebRTC uses direct UDP). Use TUN (route all) for full leak protection - IPv6 is also disabled automatically while the tunnel is up.")
+	tip := widget.NewLabel("Tip: some sites can still see your real IP in the proxy/Proxifier modes (WebRTC uses direct UDP). Use TUN (route all) for full leak protection.")
 	tip.Wrapping = fyne.TextWrapWord
 	tip.TextStyle = fyne.TextStyle{Italic: true}
 	return tip
