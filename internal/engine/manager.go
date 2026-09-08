@@ -984,28 +984,42 @@ func resolveProxifierExecutable(root, custom string) (string, error) {
 	return "", fmt.Errorf("Proxifier is not installed and not bundled in tools/proxifier; install Proxifier, place Proxifier.exe in tools/proxifier, or set its path in the profile")
 }
 
-// proxifierProfileXML builds a minimal Proxifier 4 profile that routes all
-// traffic through the given SOCKS5 proxy, leaving localhost direct.
+// proxifierProfileXML builds a Proxifier profile that routes all traffic
+// through the given SOCKS5 proxy, leaving localhost direct. It follows the
+// real Proxifier 4 / Proxifier PE schema (version 102), including the
+// portable proxification engine settings.
 func proxifierProfileXML(socksAddr string) string {
 	host := "127.0.0.1"
 	port := "10808"
 	if h, p, err := net.SplitHostPort(socksAddr); err == nil {
 		host, port = h, p
 	}
-	return `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
-		`<ProxifierProfile version="101" platform="Windows" product_id="0" product_minver="400">` + "\n" +
+	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n" +
+		`<ProxifierProfile version="102" platform="Windows" product_id="1" product_minver="400">` + "\n" +
 		`  <Options>` + "\n" +
 		`    <Resolve>` + "\n" +
 		`      <AutoModeDetection enabled="true" />` + "\n" +
 		`      <ViaProxy enabled="true" />` + "\n" +
-		`      <ExclusionList>%ComputerName%;localhost;*.local</ExclusionList>` + "\n" +
+		`      <BlockNonATypes enabled="false" />` + "\n" +
+		`      <ExclusionList OnlyFromListMode="false">%ComputerName%; localhost; *.local</ExclusionList>` + "\n" +
+		`      <DnsUdpMode>0</DnsUdpMode>` + "\n" +
 		`    </Resolve>` + "\n" +
 		`    <Encryption mode="basic" />` + "\n" +
-		`    <HttpProxiesSupport enabled="true" />` + "\n" +
-		`    <HandleDirectConnections enabled="false" />` + "\n" +
-		`    <ConnectionLoopDetection enabled="true" />` + "\n" +
-		`    <ProcessServices enabled="false" />` + "\n" +
+		`    <ConnectionLoopDetection enabled="true" resolve="true" />` + "\n" +
+		`    <Udp mode="mode_bypass" />` + "\n" +
+		`    <LeakPreventionMode enabled="false" />` + "\n" +
 		`    <ProcessOtherUsers enabled="false" />` + "\n" +
+		`    <ProcessServices enabled="false" />` + "\n" +
+		`    <HandleDirectConnections enabled="false" />` + "\n" +
+		`    <HttpProxiesSupport enabled="false" />` + "\n" +
+		`    <ProxificationPortableEngine subsystem="32">` + "\n" +
+		`      <Type hotpatch="true">Prologue</Type>` + "\n" +
+		`      <Location>Winsock</Location>` + "\n" +
+		`    </ProxificationPortableEngine>` + "\n" +
+		`    <ProxificationPortableEngine subsystem="64">` + "\n" +
+		`      <Type hotpatch="false">Prologue</Type>` + "\n" +
+		`      <Location>Winsock</Location>` + "\n" +
+		`    </ProxificationPortableEngine>` + "\n" +
 		`  </Options>` + "\n" +
 		`  <ProxyList>` + "\n" +
 		`    <Proxy id="100" type="SOCKS5">` + "\n" +
@@ -1017,14 +1031,13 @@ func proxifierProfileXML(socksAddr string) string {
 		`  <ChainList />` + "\n" +
 		`  <RuleList>` + "\n" +
 		`    <Rule enabled="true">` + "\n" +
-		`      <Name>SAKR TUN</Name>` + "\n" +
-		`      <Targets>All</Targets>` + "\n" +
-		`      <Action type="Proxy">100</Action>` + "\n" +
+		`      <Action type="Direct" />` + "\n" +
+		`      <Targets>localhost; 127.0.0.1; %ComputerName%; ::1</Targets>` + "\n" +
+		`      <Name>Localhost</Name>` + "\n" +
 		`    </Rule>` + "\n" +
 		`    <Rule enabled="true">` + "\n" +
-		`      <Name>Localhost</Name>` + "\n" +
-		`      <Targets>localhost; 127.0.0.1; %ComputerName%</Targets>` + "\n" +
-		`      <Action type="Direct" />` + "\n" +
+		`      <Action type="Proxy">100</Action>` + "\n" +
+		`      <Name>SAKR TUN</Name>` + "\n" +
 		`    </Rule>` + "\n" +
 		`  </RuleList>` + "\n" +
 		`</ProxifierProfile>` + "\n"
