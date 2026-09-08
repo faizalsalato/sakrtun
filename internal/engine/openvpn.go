@@ -51,12 +51,10 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 	}
 	args = append(args, "--verb", fmt.Sprint(verb))
 
-	// The TAP adapter creation runs through the OpenVPN interactive service
-	// ("could not talk to service" when it is stopped). The app runs elevated,
-	// so make sure the service is up before starting OpenVPN.
-	if err := ensureOpenVPNInteractiveService(); err != nil && logger != nil {
-		logger.Add("warn", "openvpn interactive service: %v", err)
-	}
+	// Note: the OpenVPN interactive service is NOT started here. It runs
+	// openvpnserv2.exe in the user session, which pops up a black console
+	// window. With the Wintun driver the service is not needed at all; it is
+	// only started in the fallback path that uses the TAP adapter.
 	// With --windows-driver wintun, OpenVPN loads wintun.dll from its own
 	// directory (or the system search path) and reuses the "Wintun" adapter,
 	// so no system driver installation is needed: prepare the embedded Wintun
@@ -112,6 +110,11 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 			if exited, procErr := proc.Exited(); exited {
 				if logger != nil {
 					logger.Add("warn", "openvpn with wintun failed (%v); retrying with the default driver...", procErr)
+				}
+				// The TAP fallback may need the interactive service; start it
+				// only now (it shows a console window, so avoid it otherwise).
+				if err := ensureOpenVPNInteractiveService(); err != nil && logger != nil {
+					logger.Add("warn", "openvpn interactive service: %v", err)
 				}
 				if driverErr := ensureOpenVPNAdapter(root, logger); driverErr != nil && logger != nil {
 					logger.Add("warn", "openvpn adapter driver: %v", driverErr)
