@@ -106,6 +106,11 @@ type UI struct {
 	udpgwHost     *widget.Entry
 	udpgwPort     *widget.Entry
 
+	routeMode    *widget.Select
+	socksInfo    *widget.Label
+	socksCopy    *widget.Button
+	syncingRoute bool
+
 	localSocksHost *widget.Entry
 	localSocksPort *widget.Entry
 
@@ -345,6 +350,34 @@ func (u *UI) profileEditor() fyne.CanvasObject {
 	u.localSocksHost = widget.NewEntry()
 	u.localSocksPort = widget.NewEntry()
 
+	// Route mode: the user picks between a full-device TUN (the system routes
+	// everything through the VPN) and a plain local SOCKS proxy (apps must be
+	// configured to use the SOCKS address manually).
+	u.routeMode = widget.NewSelect([]string{routeModeTUN, routeModeProxy}, func(s string) {
+		if u.syncingRoute {
+			return
+		}
+		u.syncingRoute = true
+		if u.tunEnabled != nil {
+			u.tunEnabled.SetChecked(s == routeModeTUN)
+		}
+		u.syncingRoute = false
+		u.updateSocksInfo()
+	})
+	u.routeMode.SetSelected(routeModeTUN)
+	u.socksInfo = widget.NewLabel("")
+	u.socksCopy = widget.NewButtonWithIcon("Copy SOCKS address", theme.ContentCopyIcon(), func() {
+		addr := u.socksInfo.Text
+		if addr == "" {
+			return
+		}
+		u.win.Clipboard().SetContent(addr)
+		u.socksCopy.SetText("Copied!")
+		time.AfterFunc(1500*time.Millisecond, func() {
+			fyne.Do(func() { u.socksCopy.SetText("Copy SOCKS address") })
+		})
+	})
+
 	u.dnsServers = widget.NewEntry()
 	u.dnsServers.SetPlaceHolder("empty = default (1.1.1.1, 8.8.8.8 / TUN DNS)")
 
@@ -356,7 +389,21 @@ func (u *UI) profileEditor() fyne.CanvasObject {
 	u.reconnectCheck = widget.NewEntry()
 	u.reconnectCheck.SetPlaceHolder("10")
 
-	u.tunEnabled = widget.NewCheck("Enable full-device TUN mode", nil)
+	u.tunEnabled = widget.NewCheck("Enable full-device TUN mode", func(on bool) {
+		if u.syncingRoute {
+			return
+		}
+		u.syncingRoute = true
+		if u.routeMode != nil {
+			if on {
+				u.routeMode.SetSelected(routeModeTUN)
+			} else {
+				u.routeMode.SetSelected(routeModeProxy)
+			}
+		}
+		u.syncingRoute = false
+		u.updateSocksInfo()
+	})
 	u.tunDevice = widget.NewEntry()
 	u.tunDevice.SetPlaceHolder("Windows: wintun | Linux: tun://socksrevive0")
 	u.tunIface = widget.NewEntry()
@@ -399,6 +446,16 @@ func (u *UI) updateModePanel() {
 		}
 	}
 	mode := modeValue(u.mode.Selected)
+	if u.routeMode != nil {
+		// OpenVPN routes through its own adapter, so the TUN/proxy choice
+		// does not apply there.
+		if mode == config.ModeOpenVPN {
+			u.routeMode.Disable()
+		} else {
+			u.routeMode.Enable()
+		}
+		u.updateSocksInfo()
+	}
 	tabs := container.NewAppTabs(
 		tabPage("Main", u.mainSection()),
 	)
@@ -450,6 +507,8 @@ func (u *UI) mainSection() fyne.CanvasObject {
 	return section("Profile", "Choose the tunnel mode first. Only the tabs needed for that mode are shown.", widget.NewForm(
 		widget.NewFormItem("Profile name", u.name),
 		widget.NewFormItem("Tunnel mode", u.mode),
+		widget.NewFormItem("Route mode", u.routeMode),
+		widget.NewFormItem("SOCKS proxy", container.NewHBox(u.socksInfo, u.socksCopy)),
 		widget.NewFormItem("Local SOCKS host", u.localSocksHost),
 		widget.NewFormItem("Local SOCKS port", u.localSocksPort),
 		widget.NewFormItem("Custom DNS servers", u.dnsServers),
@@ -780,6 +839,14 @@ func (u *UI) setProfile(p config.Profile) {
 	u.tunIPv6CIDR.SetText(p.Tun.IPv6CIDR)
 	u.tunIPv6DNS.SetText(strings.Join(p.Tun.IPv6DNS, ", "))
 	u.tunBlockIPv6Leak.SetChecked(!p.Tun.AllowIPv6Leak)
+	if u.routeMode != nil {
+		if p.Tun.Enabled {
+			u.routeMode.SetSelected(routeModeTUN)
+		} else {
+			u.routeMode.SetSelected(routeModeProxy)
+		}
+	}
+	u.updateSocksInfo()
 	u.updateModePanel()
 	u.profileList.Refresh()
 }
@@ -1423,6 +1490,50 @@ func minSize(width, height float32, obj fyne.CanvasObject) fyne.CanvasObject {
 
 func modeLabels() []string {
 	return []string{"Direct SSH", "Payload SSH", "SSL/TLS SSH", "Payload + SSL", "DNSTT + SSH", "Xray Core", "OpenVPN"}
+}
+
+const (
+	// routeModeTUN routes the whole system through the VPN with the TUN
+	// adapter. routeModeProxy only exposes the local SOCKS proxy; apps must
+	// be configured to use that SOCKS address manually.
+	routeModeTUN   = "TUN (route all)"
+	routeModeProxy = "Proxy only (SOCKS)"
+)
+
+// updateSocksInfo refreshes the "SOCKS proxy" label in the Main tab with the
+// address that local apps can use when the route mode is "Proxy only".
+func (u *UI) updateSocksInfo() {
+	if u.socksInfo == nil {
+		return
+	}
+	mode := config.ModeDirect
+	if u.mode != nil && u.mode.Selected != "" {
+		mode = modeValue(u.mode.Selected)
+	}
+	switch mode {
+	case config.ModeOpenVPN:
+		u.socksInfo.SetText("(OpenVPN routes through its own adapter)")
+	case config.ModeXray:
+		host := strings.TrimSpace(u.xraySocksHost.Text)
+		port := strings.TrimSpace(u.xraySocksPort.Text)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		if port == "" {
+			port = "10808"
+		}
+		u.socksInfo.SetText(host + ":" + port)
+	default:
+		host := strings.TrimSpace(u.localSocksHost.Text)
+		port := strings.TrimSpace(u.localSocksPort.Text)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		if port == "" {
+			port = "10809"
+		}
+		u.socksInfo.SetText(host + ":" + port)
+	}
 }
 
 func modeLabel(m config.Mode) string {
