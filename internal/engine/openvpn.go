@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -48,6 +49,13 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 	}
 	args = append(args, "--verb", fmt.Sprint(verb))
 
+	// The TAP adapter creation runs through the OpenVPN interactive service
+	// ("could not talk to service" when it is stopped). The app runs elevated,
+	// so make sure the service is up before starting OpenVPN.
+	if err := ensureOpenVPNInteractiveService(); err != nil && logger != nil {
+		logger.Add("warn", "openvpn interactive service: %v", err)
+	}
+
 	proc, err := StartProcessWithReady(ctx, root, "openvpn", exe, args, logger, openVPNReadyLine)
 	if err != nil {
 		// Only remove the file this function created; never delete a user
@@ -58,6 +66,26 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 		return nil, "", err
 	}
 	return proc, tempAuthFile, nil
+}
+
+// ensureOpenVPNInteractiveService starts the OpenVPN interactive service
+// (OpenVPNServiceInteractive) when it exists. OpenVPN uses it to create the
+// TAP adapter; when the service is stopped, the tunnel dies with
+// "create_adapter: could not talk to service". Error 1056 means the service
+// is already running, which is not a failure.
+func ensureOpenVPNInteractiveService() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	out, err := exec.Command("sc.exe", "start", "OpenVPNServiceInteractive").CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if strings.Contains(text, "1056") || strings.Contains(text, "already running") {
+			return nil
+		}
+		return fmt.Errorf("sc start failed: %v (%s)", err, text)
+	}
+	return nil
 }
 
 // resolveOpenVPNExecutable finds the openvpn binary. It prefers the copy
