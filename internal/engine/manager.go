@@ -38,23 +38,24 @@ type Status struct {
 }
 
 type Manager struct {
-	root            string
-	mu              sync.Mutex
-	logger          *Logger
-	status          Status
-	cancel          context.CancelFunc
-	ssh             *sshBundle
-	socks           *SocksServer
-	dnstt           *ManagedProcess
-	embeddedDNSTT   *dnsttclient.Client
-	xray            *ManagedProcess
-	openvpn         *ManagedProcess
-	openvpnAuthFile string
-	proxifier       *exec.Cmd
-	tun             *tun.Runner
-	routeCleanup    *routes.Cleanup
-	manualStop      bool
-	reconnecting    bool
+	root             string
+	mu               sync.Mutex
+	logger           *Logger
+	status           Status
+	cancel           context.CancelFunc
+	ssh              *sshBundle
+	socks            *SocksServer
+	dnstt            *ManagedProcess
+	embeddedDNSTT    *dnsttclient.Client
+	xray             *ManagedProcess
+	openvpn          *ManagedProcess
+	openvpnAuthFile  string
+	proxifier        *exec.Cmd
+	proxifierProfile string
+	tun              *tun.Runner
+	routeCleanup     *routes.Cleanup
+	manualStop       bool
+	reconnecting     bool
 
 	killSwitch             bool
 	killSwitchCleanup      *routes.Cleanup
@@ -744,6 +745,10 @@ func (m *Manager) stopLocked() {
 		_ = m.proxifier.Process.Kill()
 		m.proxifier = nil
 	}
+	if m.proxifierProfile != "" {
+		_ = os.Remove(m.proxifierProfile)
+		m.proxifierProfile = ""
+	}
 	// Remove the temporary OpenVPN auth-user-pass file so plain text
 	// credentials never stay on disk after the tunnel stops.
 	if m.openvpnAuthFile != "" {
@@ -946,7 +951,17 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	// build. Writing the wrong schema makes Proxifier warn that the profile
 	// "belongs to another application".
 	portable := isBundledProxifier(m.root, exe)
-	profilePath := filepath.Join(m.root, "configs", "proxifier-profile-"+p.ID+".ppx")
+	// Use a unique file name per connection: Proxifier imports the loaded
+	// file into its profile list, and reusing the same name makes it warn
+	// that the file already exists. Stale files of previous connections are
+	// removed first.
+	pattern := filepath.Join(m.root, "configs", "proxifier-profile-"+p.ID+"-*.ppx")
+	if stale, _ := filepath.Glob(pattern); len(stale) > 0 {
+		for _, s := range stale {
+			_ = os.Remove(s)
+		}
+	}
+	profilePath := filepath.Join(m.root, "configs", fmt.Sprintf("proxifier-profile-%s-%d.ppx", p.ID, time.Now().Unix()))
 	bypassApps := proxifierBypassApps(p)
 	if err := os.WriteFile(profilePath, []byte(proxifierProfileXML(socksAddr, portable, bypassApps)), 0o600); err != nil {
 		return err
@@ -957,6 +972,7 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	}
 	m.mu.Lock()
 	m.proxifier = cmd
+	m.proxifierProfile = profilePath
 	m.mu.Unlock()
 	m.logger.Add("info", "proxifier started with SOCKS proxy %s", socksAddr)
 	return nil
