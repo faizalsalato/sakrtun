@@ -58,6 +58,7 @@ type Profile struct {
 	Local     LocalConfig
 	DNS       DNSConfig
 	Tun       TunConfig
+	Proxifier ProxifierConfig
 }
 
 type SSHConfig struct {
@@ -170,6 +171,12 @@ type TunConfig struct {
 	DNS           []string
 	RouteAll      bool
 
+	// RouteMode is the routing choice shown in the Main tab:
+	// "tun" (whole system through the TUN adapter), "proxifier" (local SOCKS
+	// proxy + Proxifier forces apps through it) or "proxy" (local SOCKS only).
+	// Empty on old profiles; ApplyDefaults derives it from Enabled.
+	RouteMode string
+
 	// IPv6 is optional because many SSH/DNSTT/UDPGW servers only have IPv4
 	// egress. When IPv6Enabled is false, AllowIPv6Leak controls whether the
 	// app should leave the normal Windows/Linux IPv6 route untouched.
@@ -177,6 +184,14 @@ type TunConfig struct {
 	IPv6CIDR      string
 	IPv6DNS       []string
 	AllowIPv6Leak bool
+}
+
+// ProxifierConfig holds the optional Proxifier integration used by the
+// "Proxifier (force apps)" route mode.
+type ProxifierConfig struct {
+	// ExePath is the path to Proxifier.exe. Empty means auto-detect
+	// (Program Files locations, then PATH).
+	ExePath string
 }
 
 type Store struct {
@@ -570,6 +585,20 @@ func ApplyDefaults(p *Profile) {
 	}
 	if len(p.Tun.IPv6DNS) == 0 {
 		p.Tun.IPv6DNS = []string{"2606:4700:4700::1111", "2001:4860:4860::8888"}
+	}
+	// Normalize the route mode. New UI writes RouteMode explicitly; old
+	// profiles only carry Enabled, so derive from it.
+	switch strings.TrimSpace(p.Tun.RouteMode) {
+	case "tun":
+		p.Tun.Enabled = true
+	case "proxy", "proxifier":
+		p.Tun.Enabled = false
+	default:
+		if p.Tun.Enabled {
+			p.Tun.RouteMode = "tun"
+		} else {
+			p.Tun.RouteMode = "proxy"
+		}
 	}
 }
 

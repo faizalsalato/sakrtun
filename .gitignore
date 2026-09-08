@@ -28,3 +28,4 @@ configs/settings.json
 *.old
 *.tmp
 configs/xray-profile-*.json
+configs/proxifier-profile-*.ppx

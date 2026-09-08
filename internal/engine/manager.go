@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -49,6 +50,7 @@ type Manager struct {
 	xray            *ManagedProcess
 	openvpn         *ManagedProcess
 	openvpnAuthFile string
+	proxifier       *exec.Cmd
 	tun             *tun.Runner
 	routeCleanup    *routes.Cleanup
 	manualStop      bool
@@ -310,6 +312,13 @@ func (m *Manager) Start(p config.Profile) error {
 		return context.Canceled
 	}
 	m.logger.Add("info", "profile is connected; local socks=%s tun=%v", socksAddr, p.Tun.Enabled)
+	// In Proxifier mode the local SOCKS proxy is pushed into Proxifier so the
+	// apps are forced through the tunnel without a TUN adapter.
+	if routeModeOf(p) == "proxifier" {
+		if err := m.startProxifier(p, socksAddr); err != nil {
+			m.logger.Add("warn", "proxifier could not be started: %v", err)
+		}
+	}
 	// Verify that real traffic can pass through the tunnel. The tunnel can be
 	// up (process running, SOCKS listening) while the remote server is dead,
 	// which would leave the UI showing "Connected" with no internet. This
@@ -731,6 +740,10 @@ func (m *Manager) stopLocked() {
 		m.dnstt.Stop()
 		m.dnstt = nil
 	}
+	if m.proxifier != nil {
+		_ = m.proxifier.Process.Kill()
+		m.proxifier = nil
+	}
 	// Remove the temporary OpenVPN auth-user-pass file so plain text
 	// credentials never stay on disk after the tunnel stops.
 	if m.openvpnAuthFile != "" {
@@ -894,6 +907,118 @@ func xrayServerHosts(p config.Profile, root string) []string {
 		}
 	}
 	return out
+}
+
+// routeModeOf returns the effective route mode of the profile ("tun",
+// "proxifier" or "proxy"). ApplyDefaults already normalizes RouteMode, but
+// this stays defensive for callers that skip it.
+func routeModeOf(p config.Profile) string {
+	switch strings.TrimSpace(p.Tun.RouteMode) {
+	case "tun":
+		return "tun"
+	case "proxifier":
+		return "proxifier"
+	case "proxy":
+		return "proxy"
+	}
+	if p.Tun.Enabled {
+		return "tun"
+	}
+	return "proxy"
+}
+
+// startProxifier writes a Proxifier profile pointing at the local SOCKS proxy
+// and launches Proxifier with it. The process is killed when the tunnel stops.
+func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
+	exe, err := resolveProxifierExecutable(p.Proxifier.ExePath)
+	if err != nil {
+		return err
+	}
+	profilePath := filepath.Join(m.root, "configs", "proxifier-profile-"+p.ID+".ppx")
+	if err := os.WriteFile(profilePath, []byte(proxifierProfileXML(socksAddr)), 0o600); err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, profilePath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch %s: %w", exe, err)
+	}
+	m.mu.Lock()
+	m.proxifier = cmd
+	m.mu.Unlock()
+	m.logger.Add("info", "proxifier started with SOCKS proxy %s", socksAddr)
+	return nil
+}
+
+// resolveProxifierExecutable locates Proxifier.exe: the custom path first,
+// then the standard install locations, then PATH.
+func resolveProxifierExecutable(custom string) (string, error) {
+	custom = strings.TrimSpace(custom)
+	if custom != "" {
+		if _, err := os.Stat(custom); err == nil {
+			return custom, nil
+		}
+		return "", fmt.Errorf("proxifier executable not found: %s", custom)
+	}
+	candidates := []string{
+		`C:\Program Files (x86)\Proxifier\Proxifier.exe`,
+		`C:\Program Files\Proxifier\Proxifier.exe`,
+		`C:\Proxifier\Proxifier.exe`,
+	}
+	for _, cand := range candidates {
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	if found, err := exec.LookPath("Proxifier.exe"); err == nil {
+		return found, nil
+	}
+	return "", fmt.Errorf("Proxifier is not installed; set its executable path in the profile (Proxifier executable field)")
+}
+
+// proxifierProfileXML builds a minimal Proxifier 4 profile that routes all
+// traffic through the given SOCKS5 proxy, leaving localhost direct.
+func proxifierProfileXML(socksAddr string) string {
+	host := "127.0.0.1"
+	port := "10808"
+	if h, p, err := net.SplitHostPort(socksAddr); err == nil {
+		host, port = h, p
+	}
+	return `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+		`<ProxifierProfile version="101" platform="Windows" product_id="0" product_minver="400">` + "\n" +
+		`  <Options>` + "\n" +
+		`    <Resolve>` + "\n" +
+		`      <AutoModeDetection enabled="true" />` + "\n" +
+		`      <ViaProxy enabled="true" />` + "\n" +
+		`      <ExclusionList>%ComputerName%;localhost;*.local</ExclusionList>` + "\n" +
+		`    </Resolve>` + "\n" +
+		`    <Encryption mode="basic" />` + "\n" +
+		`    <HttpProxiesSupport enabled="true" />` + "\n" +
+		`    <HandleDirectConnections enabled="false" />` + "\n" +
+		`    <ConnectionLoopDetection enabled="true" />` + "\n" +
+		`    <ProcessServices enabled="false" />` + "\n" +
+		`    <ProcessOtherUsers enabled="false" />` + "\n" +
+		`  </Options>` + "\n" +
+		`  <ProxyList>` + "\n" +
+		`    <Proxy id="100" type="SOCKS5">` + "\n" +
+		`      <Address>` + host + `</Address>` + "\n" +
+		`      <Port>` + port + `</Port>` + "\n" +
+		`      <Options>48</Options>` + "\n" +
+		`    </Proxy>` + "\n" +
+		`  </ProxyList>` + "\n" +
+		`  <ChainList />` + "\n" +
+		`  <RuleList>` + "\n" +
+		`    <Rule enabled="true">` + "\n" +
+		`      <Name>SAKR TUN</Name>` + "\n" +
+		`      <Targets>All</Targets>` + "\n" +
+		`      <Action type="Proxy">100</Action>` + "\n" +
+		`    </Rule>` + "\n" +
+		`    <Rule enabled="true">` + "\n" +
+		`      <Name>Localhost</Name>` + "\n" +
+		`      <Targets>localhost; 127.0.0.1; %ComputerName%</Targets>` + "\n" +
+		`      <Action type="Direct" />` + "\n" +
+		`    </Rule>` + "\n" +
+		`  </RuleList>` + "\n" +
+		`</ProxifierProfile>` + "\n"
 }
 
 func sameStringSlices(a, b []string) bool {

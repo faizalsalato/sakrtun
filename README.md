@@ -38,6 +38,8 @@ with Start Menu and Desktop shortcuts, plus an uninstaller registered in Add/Rem
 | Xray Core | Starts the bundled Xray executable (or your own) and routes traffic through its local SOCKS inbound. |
 | OpenVPN | Runs the bundled OpenVPN process with your `.ovpn` config; OpenVPN owns the adapter and routes. |
 | TUN mode | Routes system traffic through the tunnel using embedded tun2socks. |
+| Route modes | Pick **TUN (route all)**, **Proxifier (force apps)** or **Proxy only (SOCKS)** per profile in the Main tab. |
+| Proxifier | Auto-generates a `.ppx` profile for the local SOCKS proxy, launches Proxifier with it, and closes it when the tunnel stops. |
 | UDPGW | Enables UDP traffic for SSH-based modes when a server-side UDPGW service is available. |
 | IPv6 | Optional IPv6 routing and IPv6 leak protection. |
 | Reconnect | Automatically reconnects after tunnel loss when enabled in the profile. |

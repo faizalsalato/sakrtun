@@ -110,6 +110,7 @@ type UI struct {
 	socksInfo    *widget.Label
 	socksCopy    *widget.Button
 	syncingRoute bool
+	proxifierExe *widget.Entry
 
 	localSocksHost *widget.Entry
 	localSocksPort *widget.Entry
@@ -351,9 +352,10 @@ func (u *UI) profileEditor() fyne.CanvasObject {
 	u.localSocksPort = widget.NewEntry()
 
 	// Route mode: the user picks between a full-device TUN (the system routes
-	// everything through the VPN) and a plain local SOCKS proxy (apps must be
-	// configured to use the SOCKS address manually).
-	u.routeMode = widget.NewSelect([]string{routeModeTUN, routeModeProxy}, func(s string) {
+	// everything through the VPN), Proxifier (the local SOCKS proxy is pushed
+	// into Proxifier, which forces apps through it) or a plain local SOCKS
+	// proxy (apps must be configured to use the SOCKS address manually).
+	u.routeMode = widget.NewSelect([]string{routeModeTUN, routeModeProxifier, routeModeProxy}, func(s string) {
 		if u.syncingRoute {
 			return
 		}
@@ -377,6 +379,8 @@ func (u *UI) profileEditor() fyne.CanvasObject {
 			fyne.Do(func() { u.socksCopy.SetText("Copy SOCKS address") })
 		})
 	})
+	u.proxifierExe = widget.NewEntry()
+	u.proxifierExe.SetPlaceHolder("empty = auto-detect Proxifier.exe (Program Files / PATH)")
 
 	u.dnsServers = widget.NewEntry()
 	u.dnsServers.SetPlaceHolder("empty = default (1.1.1.1, 8.8.8.8 / TUN DNS)")
@@ -509,6 +513,7 @@ func (u *UI) mainSection() fyne.CanvasObject {
 		widget.NewFormItem("Tunnel mode", u.mode),
 		widget.NewFormItem("Route mode", u.routeMode),
 		widget.NewFormItem("SOCKS proxy", container.NewHBox(u.socksInfo, u.socksCopy)),
+		widget.NewFormItem("Proxifier executable", u.proxifierExe),
 		widget.NewFormItem("Local SOCKS host", u.localSocksHost),
 		widget.NewFormItem("Local SOCKS port", u.localSocksPort),
 		widget.NewFormItem("Custom DNS servers", u.dnsServers),
@@ -839,11 +844,15 @@ func (u *UI) setProfile(p config.Profile) {
 	u.tunIPv6CIDR.SetText(p.Tun.IPv6CIDR)
 	u.tunIPv6DNS.SetText(strings.Join(p.Tun.IPv6DNS, ", "))
 	u.tunBlockIPv6Leak.SetChecked(!p.Tun.AllowIPv6Leak)
+	u.proxifierExe.SetText(p.Proxifier.ExePath)
 	if u.routeMode != nil {
-		if p.Tun.Enabled {
-			u.routeMode.SetSelected(routeModeTUN)
-		} else {
+		switch routeModeOfUI(p) {
+		case "proxifier":
+			u.routeMode.SetSelected(routeModeProxifier)
+		case "proxy":
 			u.routeMode.SetSelected(routeModeProxy)
+		default:
+			u.routeMode.SetSelected(routeModeTUN)
 		}
 	}
 	u.updateSocksInfo()
@@ -908,6 +917,8 @@ func (u *UI) readProfileFromForm() (config.Profile, error) {
 	p.Reconnect.MaxRetries = mustInt(u.reconnectMax.Text, 0)
 	p.Reconnect.CheckIntervalSeconds = mustInt(u.reconnectCheck.Text, 10)
 	p.Tun.Enabled = u.tunEnabled.Checked
+	p.Tun.RouteMode = u.routeModeFromUI()
+	p.Proxifier.ExePath = strings.TrimSpace(u.proxifierExe.Text)
 	p.Tun.Device = strings.TrimSpace(u.tunDevice.Text)
 	p.Tun.InterfaceName = strings.TrimSpace(u.tunIface.Text)
 	p.Tun.MTU = mustInt(u.tunMTU.Text, 1500)
@@ -1494,11 +1505,43 @@ func modeLabels() []string {
 
 const (
 	// routeModeTUN routes the whole system through the VPN with the TUN
-	// adapter. routeModeProxy only exposes the local SOCKS proxy; apps must
-	// be configured to use that SOCKS address manually.
-	routeModeTUN   = "TUN (route all)"
-	routeModeProxy = "Proxy only (SOCKS)"
+	// adapter. routeModeProxifier forces apps through the local SOCKS proxy
+	// with Proxifier. routeModeProxy only exposes the local SOCKS proxy; apps
+	// must be configured to use that SOCKS address manually.
+	routeModeTUN       = "TUN (route all)"
+	routeModeProxifier = "Proxifier (force apps)"
+	routeModeProxy     = "Proxy only (SOCKS)"
 )
+
+// routeModeFromUI returns the route mode value currently selected in the
+// Main tab ("tun", "proxifier" or "proxy").
+func (u *UI) routeModeFromUI() string {
+	switch u.routeMode.Selected {
+	case routeModeProxifier:
+		return "proxifier"
+	case routeModeProxy:
+		return "proxy"
+	default:
+		return "tun"
+	}
+}
+
+// routeModeOfUI converts the profile routing fields into the route mode
+// shown in the Main tab. Old profiles carry only Tun.Enabled, so derive it.
+func routeModeOfUI(p config.Profile) string {
+	switch strings.TrimSpace(p.Tun.RouteMode) {
+	case "tun":
+		return "tun"
+	case "proxy":
+		return "proxy"
+	case "proxifier":
+		return "proxifier"
+	}
+	if p.Tun.Enabled {
+		return "tun"
+	}
+	return "proxy"
+}
 
 // updateSocksInfo refreshes the "SOCKS proxy" label in the Main tab with the
 // address that local apps can use when the route mode is "Proxy only".
