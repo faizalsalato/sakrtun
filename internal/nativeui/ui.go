@@ -1142,6 +1142,12 @@ func (u *UI) importLink() {
 			}
 			p := config.Profile{Name: cfg.Name, Mode: config.ModeXray, Xray: config.XrayConfig{ConfigJSON: cfg.JSON}}
 			config.ApplyDefaults(&p)
+			// Imported links are expected to route the whole system: enable the
+			// TUN adapter with route-all by default, otherwise the Xray core
+			// only exposes a local SOCKS proxy and the user's apps have no
+			// internet even though the app reports "Connected".
+			p.Tun.Enabled = true
+			p.Tun.RouteAll = true
 			saved, err := u.core.Store.Save(p)
 			if err != nil {
 				failed = append(failed, cfg.Name+": "+err.Error())

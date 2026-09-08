@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -101,7 +102,7 @@ func (m *Manager) Start(p config.Profile) error {
 	m.cancel = cancel
 	m.manualStop = false
 	m.lastProfile = p
-	m.killSwitchHosts = profileControlHosts(p)
+	m.killSwitchHosts = profileControlHosts(p, m.root)
 	m.status = Status{Connecting: true, ProfileID: p.ID, Mode: string(p.Mode), Tun: p.Tun.Enabled, TunRouteAll: p.Tun.RouteAll, KillSwitch: m.killSwitch, StartedAt: time.Now().Format(time.RFC3339)}
 	// Keep the internet blocked (kill switch) while connecting. The bypass
 	// routes built for this profile let the connection reach its own servers.
@@ -212,7 +213,7 @@ func (m *Manager) Start(p config.Profile) error {
 		if err := waitForTCP(ctx, socksAddr, time.Duration(p.Xray.StartupTimeoutMs)*time.Millisecond); err != nil {
 			return fail("xray local SOCKS is not listening on %s: %w", socksAddr, err)
 		}
-		bypass = nil
+		bypass = xrayServerHosts(p, m.root)
 	default:
 		if p.Mode == config.ModeDNSTT {
 			if p.DNSTT.UseEmbedded {
@@ -759,9 +760,9 @@ func (m *Manager) SetKillSwitch(enabled bool, profile config.Profile) error {
 	if enabled {
 		if profile.ID != "" {
 			m.lastProfile = profile
-			m.killSwitchHosts = profileControlHosts(profile)
+			m.killSwitchHosts = profileControlHosts(profile, m.root)
 		} else if m.lastProfile.ID != "" {
-			m.killSwitchHosts = profileControlHosts(m.lastProfile)
+			m.killSwitchHosts = profileControlHosts(m.lastProfile, m.root)
 		}
 	}
 	return m.syncKillSwitchLocked()
@@ -809,9 +810,9 @@ func (m *Manager) syncKillSwitchLocked() error {
 }
 
 // profileControlHosts lists the hosts a profile needs to reach while the
-// internet is blocked: the SSH target, the TLS front, rotated proxies and the
-// DNSTT resolver.
-func profileControlHosts(p config.Profile) []string {
+// internet is blocked: the SSH target, the TLS front, rotated proxies, the
+// DNSTT resolver and the Xray servers.
+func profileControlHosts(p config.Profile, root string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(host string) {
@@ -832,6 +833,66 @@ func profileControlHosts(p config.Profile) []string {
 		add(h)
 	}
 	add(dnsttResolverHost(p.DNSTT.ResolverAddress))
+	for _, h := range xrayServerHosts(p, root) {
+		add(h)
+	}
+	return out
+}
+
+// xrayServerHosts extracts the remote server addresses from the Xray config
+// (inline JSON first, then the config file). These hosts must stay reachable
+// through the physical gateway once the TUN route-all takes over, otherwise
+// the Xray control connection loops back into the TUN and starves the socket
+// buffers (\"bind: ... queue was full\"), producing a tunnel that connects but
+// passes no data.
+func xrayServerHosts(p config.Profile, root string) []string {
+	raw := strings.TrimSpace(p.Xray.ConfigJSON)
+	if raw == "" && strings.TrimSpace(p.Xray.ConfigPath) != "" {
+		if b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.Xray.ConfigPath))); err == nil {
+			raw = string(b)
+		}
+	}
+	if raw == "" {
+		return nil
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Vnext []struct {
+					Address string `json:"address"`
+				} `json:"vnext"`
+				Servers []struct {
+					Address string `json:"address"`
+				} `json:"servers"`
+			} `json:"settings"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(h string) {
+		h = strings.TrimSpace(h)
+		if h == "" || isLocalBypassHost(h) || seen[h] {
+			return
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	for _, ob := range cfg.Outbounds {
+		switch ob.Protocol {
+		case "vless", "vmess":
+			for _, v := range ob.Settings.Vnext {
+				add(v.Address)
+			}
+		case "trojan", "shadowsocks":
+			for _, s := range ob.Settings.Servers {
+				add(s.Address)
+			}
+		}
+	}
 	return out
 }
 
