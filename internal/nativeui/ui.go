@@ -522,6 +522,7 @@ func (u *UI) mainSection() fyne.CanvasObject {
 		widget.NewFormItem("Proxifier executable", u.proxifierExe),
 		widget.NewFormItem("Proxifier license name", u.proxifierLicName),
 		widget.NewFormItem("Proxifier license key", u.proxifierLicKey),
+		widget.NewFormItem("", u.routeModeTip()),
 		widget.NewFormItem("Local SOCKS host", u.localSocksHost),
 		widget.NewFormItem("Local SOCKS port", u.localSocksPort),
 		widget.NewFormItem("Custom DNS servers", u.dnsServers),
@@ -1524,6 +1525,15 @@ const (
 	routeModeProxifier = "Proxifier (force apps)"
 	routeModeProxy     = "Proxy only (SOCKS)"
 )
+
+// routeModeTip explains the leak caveats of the proxy modes so users know why
+// some sites may still see the machine's real IP (WebRTC, non-proxied apps).
+func (u *UI) routeModeTip() fyne.CanvasObject {
+	tip := widget.NewLabel("Tip: some sites can still see your real IP in the proxy/Proxifier modes (WebRTC uses direct UDP). Use TUN (route all) for full leak protection - IPv6 is also disabled automatically while the tunnel is up.")
+	tip.Wrapping = fyne.TextWrapWord
+	tip.TextStyle = fyne.TextStyle{Italic: true}
+	return tip
+}
 
 // routeModeFromUI returns the route mode value currently selected in the
 // Main tab ("tun", "proxifier" or "proxy").

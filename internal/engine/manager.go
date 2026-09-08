@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ type Manager struct {
 	openvpnAuthFile  string
 	proxifier        *exec.Cmd
 	proxifierProfile string
+	ipv6Blocked      bool
 	tun              *tun.Runner
 	routeCleanup     *routes.Cleanup
 	manualStop       bool
@@ -313,6 +315,20 @@ func (m *Manager) Start(p config.Profile) error {
 		return context.Canceled
 	}
 	m.logger.Add("info", "profile is connected; local socks=%s tun=%v", socksAddr, p.Tun.Enabled)
+	// Without a full TUN the system IPv6 is not routed through the tunnel, so
+	// IPv6-capable sites would see the machine's real IP. Disable the IPv6
+	// bindings while the tunnel is up unless the profile explicitly allows the
+	// leak (or the tunnel itself carries IPv6).
+	if !p.Tun.IPv6Enabled && !p.Tun.AllowIPv6Leak {
+		if err := setSystemIPv6Enabled(false); err != nil {
+			m.logger.Add("warn", "could not disable system IPv6: %v", err)
+		} else {
+			m.mu.Lock()
+			m.ipv6Blocked = true
+			m.mu.Unlock()
+			m.logger.Add("info", "system IPv6 disabled to prevent IP leaks")
+		}
+	}
 	// In Proxifier mode the local SOCKS proxy is pushed into Proxifier so the
 	// apps are forced through the tunnel without a TUN adapter.
 	if routeModeOf(p) == "proxifier" {
@@ -749,6 +765,14 @@ func (m *Manager) stopLocked() {
 		_ = os.Remove(m.proxifierProfile)
 		m.proxifierProfile = ""
 	}
+	if m.ipv6Blocked {
+		if err := setSystemIPv6Enabled(true); err != nil {
+			m.logger.Add("warn", "could not re-enable system IPv6: %v", err)
+		} else {
+			m.logger.Add("info", "system IPv6 re-enabled")
+		}
+		m.ipv6Blocked = false
+	}
 	// Remove the temporary OpenVPN auth-user-pass file so plain text
 	// credentials never stay on disk after the tunnel stops.
 	if m.openvpnAuthFile != "" {
@@ -1003,6 +1027,27 @@ func proxifierBypassApps(p config.Profile) []string {
 		apps = append(apps, "dnstt-client.exe")
 	}
 	return apps
+}
+
+// setSystemIPv6Enabled enables or disables the IPv6 protocol bindings on all
+// network adapters. It is used to prevent IPv6 leaks in proxy/Proxifier modes,
+// where the tunnel does not carry IPv6 but the OS would still prefer native
+// IPv6 routes and reveal the machine's real address to IPv6-capable sites.
+func setSystemIPv6Enabled(enabled bool) error {
+	if runtime.GOOS != "windows" {
+		// On other systems the routes handle IPv6 (see routes.Apply).
+		return nil
+	}
+	cmd := "Disable-NetAdapterBinding"
+	if enabled {
+		cmd = "Enable-NetAdapterBinding"
+	}
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		cmd+" -Name '*' -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %v (%s)", cmd, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // registerProxifierLicense writes the Proxifier registration into the
