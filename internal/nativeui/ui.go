@@ -389,6 +389,15 @@ func (u *UI) updateModePanel() {
 	if u.modeContent == nil || u.mode == nil {
 		return
 	}
+	// Preserve the currently selected tab across panel rebuilds (for example
+	// when connecting from the Logs tab, the form reload must not kick the
+	// user back to the Main tab).
+	selectedTitle := ""
+	if len(u.modeContent.Objects) > 0 {
+		if tabs, ok := u.modeContent.Objects[0].(*container.AppTabs); ok && tabs.Selected() != nil {
+			selectedTitle = tabs.Selected().Text
+		}
+	}
 	mode := modeValue(u.mode.Selected)
 	tabs := container.NewAppTabs(
 		tabPage("Main", u.mainSection()),
@@ -425,6 +434,14 @@ func (u *UI) updateModePanel() {
 	}
 	tabs.Append(tabPage("Logs", u.logsSection()))
 	tabs.SetTabLocation(container.TabLocationTop)
+	if selectedTitle != "" {
+		for _, item := range tabs.Items {
+			if item.Text == selectedTitle {
+				tabs.Select(item)
+				break
+			}
+		}
+	}
 	u.modeContent.Objects = []fyne.CanvasObject{tabs}
 	u.modeContent.Refresh()
 }
