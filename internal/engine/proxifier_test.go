@@ -66,6 +66,9 @@ func TestProxifierProfileXML(t *testing.T) {
 		if !strings.Contains(xmlStr, "<Applications>SAKRTUN.exe; xray.exe</Applications>") {
 			t.Fatal("profile must contain the tunnel bypass rule")
 		}
+		if !strings.Contains(xmlStr, `<Udp mode="mode_block_443" />`) {
+			t.Fatal("profile must block UDP 443 (QUIC) so browsers use TCP over the proxy")
+		}
 		if portable {
 			if !strings.Contains(xmlStr, "ProxificationPortableEngine") {
 				t.Fatal("portable profile must include the portable proxification engine")

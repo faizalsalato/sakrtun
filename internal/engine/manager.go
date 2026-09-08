@@ -1066,7 +1066,9 @@ func resolveProxifierExecutable(root, custom string) (string, error) {
 // wrong one makes Proxifier warn that the profile belongs to another app.
 // The tunnel processes themselves are bypassed (Direct), otherwise Proxifier
 // would force the Xray/OpenVPN control connection through its own SOCKS port
-// and trigger its "Infinite Connection Loop Detection".
+// and trigger its "Infinite Connection Loop Detection". UDP port 443 (QUIC /
+// HTTP3) is blocked so browsers fall back to TCP over the proxy instead of
+// opening direct UDP connections that would bypass the tunnel.
 func proxifierProfileXML(socksAddr string, portable bool, bypassApps []string) string {
 	host := "127.0.0.1"
 	port := "10808"
@@ -1101,7 +1103,7 @@ func proxifierProfileXML(socksAddr string, portable bool, bypassApps []string) s
 		`    </Resolve>` + "\n" +
 		`    <Encryption mode="basic" />` + "\n" +
 		`    <ConnectionLoopDetection enabled="true" resolve="true" />` + "\n" +
-		`    <Udp mode="mode_bypass" />` + "\n" +
+		`    <Udp mode="mode_block_443" />` + "\n" +
 		`    <LeakPreventionMode enabled="false" />` + "\n" +
 		`    <ProcessOtherUsers enabled="false" />` + "\n" +
 		`    <ProcessServices enabled="false" />` + "\n" +
