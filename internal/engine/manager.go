@@ -304,6 +304,7 @@ func (m *Manager) Start(p config.Profile) error {
 	}
 	m.logger.Add("info", "profile is connected; local socks=%s tun=%v", socksAddr, p.Tun.Enabled)
 	m.startMonitor(ctx, p)
+	m.startKeepAlive(ctx, p)
 	return nil
 }
 
@@ -449,6 +450,57 @@ func (m *Manager) startMonitor(ctx context.Context, p config.Profile) {
 	}()
 }
 
+// startKeepAlive sends SSH keepalives for the whole connection lifetime,
+// using the profile's "Keep alive seconds" value. This generates traffic on
+// idle tunnels (preventing silent drops by NAT/middleboxes) and detects a
+// dead connection early: it either triggers the reconnect loop or, when
+// reconnect is disabled, stops the tunnel cleanly so the UI shows
+// Disconnected instead of a stale Connected.
+func (m *Manager) startKeepAlive(ctx context.Context, p config.Profile) {
+	interval := time.Duration(p.SSH.KeepAliveSeconds) * time.Second
+	if interval <= 0 {
+		interval = 20 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if m.isManualStopped() {
+					return
+				}
+				m.mu.Lock()
+				sshc := m.ssh
+				m.mu.Unlock()
+				if sshc == nil || sshc.Client == nil {
+					continue // not an SSH-based mode (xray/openvpn)
+				}
+				if err := sendSSHKeepAlive(sshc); err != nil {
+					m.logger.Add("warn", "keepalive failed, tunnel lost: %v", err)
+					if p.Reconnect.Enabled {
+						m.reconnectLoop(p, err)
+					} else {
+						m.stop(false)
+					}
+					return
+				}
+			}
+		}
+	}()
+}
+
+func sendSSHKeepAlive(sshc *sshBundle) error {
+	if sshc.Conn != nil {
+		_ = sshc.Conn.SetDeadline(time.Now().Add(5 * time.Second))
+		defer sshc.Conn.SetDeadline(time.Time{})
+	}
+	_, _, err := sshc.Client.SendRequest("keepalive@openssh.com", true, nil)
+	return err
+}
+
 func (m *Manager) isManualStopped() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -507,12 +559,7 @@ func (m *Manager) probeConnection(p config.Profile) error {
 		return nil
 	}
 	if sshc != nil && sshc.Client != nil {
-		if sshc.Conn != nil {
-			_ = sshc.Conn.SetDeadline(time.Now().Add(5 * time.Second))
-			defer sshc.Conn.SetDeadline(time.Time{})
-		}
-		_, _, err := sshc.Client.SendRequest("keepalive@openssh.com", true, nil)
-		if err != nil {
+		if err := sendSSHKeepAlive(sshc); err != nil {
 			return fmt.Errorf("ssh keepalive failed: %w", err)
 		}
 	}
