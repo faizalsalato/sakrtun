@@ -27,3 +27,4 @@ configs/settings.json
 # Temp files
 *.old
 *.tmp
+configs/xray-profile-*.json
