@@ -930,7 +930,7 @@ func routeModeOf(p config.Profile) string {
 // startProxifier writes a Proxifier profile pointing at the local SOCKS proxy
 // and launches Proxifier with it. The process is killed when the tunnel stops.
 func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
-	exe, err := resolveProxifierExecutable(p.Proxifier.ExePath)
+	exe, err := resolveProxifierExecutable(m.root, p.Proxifier.ExePath)
 	if err != nil {
 		return err
 	}
@@ -949,15 +949,24 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	return nil
 }
 
-// resolveProxifierExecutable locates Proxifier.exe: the custom path first,
-// then the standard install locations, then PATH.
-func resolveProxifierExecutable(custom string) (string, error) {
+// resolveProxifierExecutable locates Proxifier.exe: the custom profile path
+// first, then the bundled copy in tools/proxifier (same layout as the bundled
+// OpenVPN/Xray), then the standard install locations, then PATH.
+func resolveProxifierExecutable(root, custom string) (string, error) {
 	custom = strings.TrimSpace(custom)
 	if custom != "" {
-		if _, err := os.Stat(custom); err == nil {
-			return custom, nil
+		p := custom
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(root, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
 		}
 		return "", fmt.Errorf("proxifier executable not found: %s", custom)
+	}
+	bundled := filepath.Join(root, "tools", "proxifier", "Proxifier.exe")
+	if _, err := os.Stat(bundled); err == nil {
+		return bundled, nil
 	}
 	candidates := []string{
 		`C:\Program Files (x86)\Proxifier\Proxifier.exe`,
@@ -972,7 +981,7 @@ func resolveProxifierExecutable(custom string) (string, error) {
 	if found, err := exec.LookPath("Proxifier.exe"); err == nil {
 		return found, nil
 	}
-	return "", fmt.Errorf("Proxifier is not installed; set its executable path in the profile (Proxifier executable field)")
+	return "", fmt.Errorf("Proxifier is not installed and not bundled in tools/proxifier; install Proxifier, place Proxifier.exe in tools/proxifier, or set its path in the profile")
 }
 
 // proxifierProfileXML builds a minimal Proxifier 4 profile that routes all

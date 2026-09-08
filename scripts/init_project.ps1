@@ -160,15 +160,43 @@ if (Test-Path (Join-Path $toolsO "openvpn.exe")) {
     Write-Host "OK: openvpn installed in tools/openvpn"
 }
 
-# --- 7. Logo ---------------------------------------------------------------
-Write-Step "7/8 Logo"
+# --- 7. Proxifier ------------------------------------------------------------
+Write-Step "7/9 Proxifier (bundled, optional)"
+$toolsP = Join-Path $root "tools\proxifier"
+New-Item -ItemType Directory -Force -Path $toolsP | Out-Null
+if (Test-Path (Join-Path $toolsP "Proxifier.exe")) {
+    Write-Host "OK: Proxifier.exe already present"
+} else {
+    $pfCandidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Proxifier\Proxifier.exe"),
+        (Join-Path $env:ProgramFiles "Proxifier\Proxifier.exe")
+    )
+    $found = $null
+    foreach ($cand in $pfCandidates) {
+        if (Test-Path $cand) {
+            $found = $cand
+            break
+        }
+    }
+    if ($found) {
+        Write-Host "Copying the installed Proxifier..."
+        Copy-Item (Join-Path (Split-Path $found) "*") $toolsP -Force
+        Write-Host "OK: Proxifier copied to tools/proxifier"
+    } else {
+        Write-Host "Proxifier not detected. Proxifier is commercial software, so it cannot be downloaded automatically." -ForegroundColor Yellow
+        Write-Host "If you own a license, copy Proxifier.exe (and its DLLs) into tools\proxifier manually." -ForegroundColor Yellow
+    }
+}
+
+# --- 8. Logo ---------------------------------------------------------------
+Write-Step "8/9 Logo"
 powershell -ExecutionPolicy Bypass -File (Join-Path $root "scripts\generate_logo.ps1")
 
-# --- 8. Build ----------------------------------------------------------------
+# --- 9. Build ----------------------------------------------------------------
 if ($SkipBuild) {
-    Write-Step "8/8 Build skipped (-SkipBuild)"
+    Write-Step "9/9 Build skipped (-SkipBuild)"
 } else {
-    Write-Step "8/8 Build (exe + installer)"
+    Write-Step "9/9 Build (exe + installer)"
     powershell -ExecutionPolicy Bypass -File (Join-Path $root "scripts\build_windows.ps1") -NoTidy
     if ($LASTEXITCODE -ne 0) {
         throw "build_windows.ps1 failed."

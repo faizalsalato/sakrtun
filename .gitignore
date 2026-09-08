@@ -17,6 +17,8 @@ tools/openvpn/*.reg
 tools/dnstt/*.exe
 tools/dnstt/*.dll
 tools/mesa/*.dll
+tools/proxifier/*.exe
+tools/proxifier/*.dll
 tools/wintun/**/*.dll
 
 # User data / secrets
