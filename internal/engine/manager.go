@@ -927,9 +927,17 @@ func routeModeOf(p config.Profile) string {
 	return "proxy"
 }
 
-// startProxifier writes a Proxifier profile pointing at the local SOCKS proxy
-// and launches Proxifier with it. The process is killed when the tunnel stops.
+// startProxifier registers the license (when configured), writes a Proxifier
+// profile pointing at the local SOCKS proxy and launches Proxifier with it.
+// The process is killed when the tunnel stops.
 func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
+	if strings.TrimSpace(p.Proxifier.LicenseKey) != "" {
+		if err := registerProxifierLicense(p.Proxifier.LicenseName, p.Proxifier.LicenseKey); err != nil {
+			m.logger.Add("warn", "proxifier license registration failed: %v", err)
+		} else {
+			m.logger.Add("info", "proxifier license registered")
+		}
+	}
 	exe, err := resolveProxifierExecutable(m.root, p.Proxifier.ExePath)
 	if err != nil {
 		return err
@@ -949,9 +957,37 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	return nil
 }
 
+// registerProxifierLicense writes the Proxifier registration into the
+// registry key the official Proxifier build reads:
+// HKCU\Software\Initex\Proxifier\License with the Name and Key values.
+func registerProxifierLicense(name, key string) error {
+	path := `HKCU\Software\Initex\Proxifier\License`
+	if name == "" {
+		name = "SAKR TUN"
+	}
+	if out, err := exec.Command("reg.exe", "add", path, "/v", "Name", "/t", "REG_SZ", "/d", name, "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg add Name: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("reg.exe", "add", path, "/v", "Key", "/t", "REG_SZ", "/d", key, "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg add Key: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// proxifierCandidates returns the Proxifier.exe search order: the normal
+// Program Files installation first, then the bundled tools/proxifier copy.
+func proxifierCandidates(root string) []string {
+	return []string{
+		`C:\Program Files (x86)\Proxifier\Proxifier.exe`,
+		`C:\Program Files\Proxifier\Proxifier.exe`,
+		filepath.Join(root, "tools", "proxifier", "Proxifier.exe"),
+		`C:\Proxifier\Proxifier.exe`,
+	}
+}
+
 // resolveProxifierExecutable locates Proxifier.exe: the custom profile path
-// first, then the bundled copy in tools/proxifier (same layout as the bundled
-// OpenVPN/Xray), then the standard install locations, then PATH.
+// first, then the normal Program Files installation, then the bundled copy in
+// tools/proxifier, then PATH.
 func resolveProxifierExecutable(root, custom string) (string, error) {
 	custom = strings.TrimSpace(custom)
 	if custom != "" {
@@ -964,16 +1000,7 @@ func resolveProxifierExecutable(root, custom string) (string, error) {
 		}
 		return "", fmt.Errorf("proxifier executable not found: %s", custom)
 	}
-	bundled := filepath.Join(root, "tools", "proxifier", "Proxifier.exe")
-	if _, err := os.Stat(bundled); err == nil {
-		return bundled, nil
-	}
-	candidates := []string{
-		`C:\Program Files (x86)\Proxifier\Proxifier.exe`,
-		`C:\Program Files\Proxifier\Proxifier.exe`,
-		`C:\Proxifier\Proxifier.exe`,
-	}
-	for _, cand := range candidates {
+	for _, cand := range proxifierCandidates(root) {
 		if _, err := os.Stat(cand); err == nil {
 			return cand, nil
 		}

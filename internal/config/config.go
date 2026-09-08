@@ -190,8 +190,13 @@ type TunConfig struct {
 // "Proxifier (force apps)" route mode.
 type ProxifierConfig struct {
 	// ExePath is the path to Proxifier.exe. Empty means auto-detect
-	// (Program Files locations, then PATH).
+	// (the normal Program Files install first, then tools/proxifier).
 	ExePath string
+	// LicenseName and LicenseKey register Proxifier automatically before
+	// launching it. The license is written to
+	// HKCU\Software\Initex\Proxifier\License (Name and Key values).
+	LicenseName string
+	LicenseKey  string
 }
 
 type Store struct {

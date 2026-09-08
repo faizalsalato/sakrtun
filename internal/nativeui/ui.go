@@ -106,11 +106,13 @@ type UI struct {
 	udpgwHost     *widget.Entry
 	udpgwPort     *widget.Entry
 
-	routeMode    *widget.Select
-	socksInfo    *widget.Label
-	socksCopy    *widget.Button
-	syncingRoute bool
-	proxifierExe *widget.Entry
+	routeMode        *widget.Select
+	socksInfo        *widget.Label
+	socksCopy        *widget.Button
+	syncingRoute     bool
+	proxifierExe     *widget.Entry
+	proxifierLicName *widget.Entry
+	proxifierLicKey  *widget.Entry
 
 	localSocksHost *widget.Entry
 	localSocksPort *widget.Entry
@@ -381,6 +383,10 @@ func (u *UI) profileEditor() fyne.CanvasObject {
 	})
 	u.proxifierExe = widget.NewEntry()
 	u.proxifierExe.SetPlaceHolder("empty = auto-detect Proxifier.exe (Program Files / PATH)")
+	u.proxifierLicName = widget.NewEntry()
+	u.proxifierLicName.SetPlaceHolder("license owner name")
+	u.proxifierLicKey = widget.NewEntry()
+	u.proxifierLicKey.SetPlaceHolder("registration key (registered automatically)")
 
 	u.dnsServers = widget.NewEntry()
 	u.dnsServers.SetPlaceHolder("empty = default (1.1.1.1, 8.8.8.8 / TUN DNS)")
@@ -514,6 +520,8 @@ func (u *UI) mainSection() fyne.CanvasObject {
 		widget.NewFormItem("Route mode", u.routeMode),
 		widget.NewFormItem("SOCKS proxy", container.NewHBox(u.socksInfo, u.socksCopy)),
 		widget.NewFormItem("Proxifier executable", u.proxifierExe),
+		widget.NewFormItem("Proxifier license name", u.proxifierLicName),
+		widget.NewFormItem("Proxifier license key", u.proxifierLicKey),
 		widget.NewFormItem("Local SOCKS host", u.localSocksHost),
 		widget.NewFormItem("Local SOCKS port", u.localSocksPort),
 		widget.NewFormItem("Custom DNS servers", u.dnsServers),
@@ -845,6 +853,8 @@ func (u *UI) setProfile(p config.Profile) {
 	u.tunIPv6DNS.SetText(strings.Join(p.Tun.IPv6DNS, ", "))
 	u.tunBlockIPv6Leak.SetChecked(!p.Tun.AllowIPv6Leak)
 	u.proxifierExe.SetText(p.Proxifier.ExePath)
+	u.proxifierLicName.SetText(p.Proxifier.LicenseName)
+	u.proxifierLicKey.SetText(p.Proxifier.LicenseKey)
 	if u.routeMode != nil {
 		switch routeModeOfUI(p) {
 		case "proxifier":
@@ -919,6 +929,8 @@ func (u *UI) readProfileFromForm() (config.Profile, error) {
 	p.Tun.Enabled = u.tunEnabled.Checked
 	p.Tun.RouteMode = u.routeModeFromUI()
 	p.Proxifier.ExePath = strings.TrimSpace(u.proxifierExe.Text)
+	p.Proxifier.LicenseName = strings.TrimSpace(u.proxifierLicName.Text)
+	p.Proxifier.LicenseKey = strings.TrimSpace(u.proxifierLicKey.Text)
 	p.Tun.Device = strings.TrimSpace(u.tunDevice.Text)
 	p.Tun.InterfaceName = strings.TrimSpace(u.tunIface.Text)
 	p.Tun.MTU = mustInt(u.tunMTU.Text, 1500)

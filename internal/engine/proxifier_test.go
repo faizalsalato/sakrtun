@@ -8,21 +8,22 @@ import (
 	"testing"
 )
 
-func TestResolveProxifierExecutableBundled(t *testing.T) {
+func TestProxifierCandidatesOrder(t *testing.T) {
 	root := t.TempDir()
-	bundled := filepath.Join(root, "tools", "proxifier", "Proxifier.exe")
-	if err := os.MkdirAll(filepath.Dir(bundled), 0o755); err != nil {
-		t.Fatal(err)
+	got := proxifierCandidates(root)
+	want := []string{
+		`C:\Program Files (x86)\Proxifier\Proxifier.exe`,
+		`C:\Program Files\Proxifier\Proxifier.exe`,
+		filepath.Join(root, "tools", "proxifier", "Proxifier.exe"),
+		`C:\Proxifier\Proxifier.exe`,
 	}
-	if err := os.WriteFile(bundled, []byte("dummy"), 0o600); err != nil {
-		t.Fatal(err)
+	if len(got) != len(want) {
+		t.Fatalf("unexpected candidate count: %d", len(got))
 	}
-	got, err := resolveProxifierExecutable(root, "")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got != bundled {
-		t.Fatalf("expected bundled %s, got %s", bundled, got)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate %d: got %s want %s", i, got[i], want[i])
+		}
 	}
 }
 
