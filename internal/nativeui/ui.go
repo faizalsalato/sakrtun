@@ -1239,7 +1239,12 @@ func (u *UI) refreshStatus() {
 	s := u.core.Engine.Status()
 	if s.Running {
 		u.status.SetText("Connected")
-		u.subStatus.SetText(fmt.Sprintf("Mode: %s  |  SOCKS: %s  |  TUN: %v", s.Mode, s.SocksAddr, s.Tun))
+		sub := fmt.Sprintf("Mode: %s  |  SOCKS: %s  |  TUN: %v", s.Mode, s.SocksAddr, s.Tun)
+		if s.Traffic == "failed" {
+			u.status.SetText("Connected (no traffic!)")
+			sub += "  |  no traffic passing - server may be offline"
+		}
+		u.subStatus.SetText(sub)
 		if u.connectBtn != nil {
 			u.connectBtn.Enable()
 			u.connectBtn.SetText("Disconnect")

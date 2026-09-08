@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/proxy"
+
 	"socksrevivepc/internal/config"
 	"socksrevivepc/internal/dnsttclient"
 	"socksrevivepc/internal/routes"
@@ -27,6 +29,10 @@ type Status struct {
 	TunRouteAll bool   `json:"tun_route_all"`
 	KillSwitch  bool   `json:"kill_switch"`
 	StartedAt   string `json:"started_at"`
+	// Traffic reports the post-connect traffic probe result:
+	// "" = not probed yet, "ok" = traffic passes, "failed" = connected but
+	// no traffic is passing (the remote server may be offline).
+	Traffic string `json:"traffic"`
 }
 
 type Manager struct {
@@ -303,9 +309,63 @@ func (m *Manager) Start(p config.Profile) error {
 		return context.Canceled
 	}
 	m.logger.Add("info", "profile is connected; local socks=%s tun=%v", socksAddr, p.Tun.Enabled)
+	// Verify that real traffic can pass through the tunnel. The tunnel can be
+	// up (process running, SOCKS listening) while the remote server is dead,
+	// which would leave the UI showing "Connected" with no internet. This
+	// probe reports that state clearly in the logs and in the UI.
+	if socksAddr != "" {
+		go m.verifyTraffic(ctx, socksAddr)
+	}
 	m.startMonitor(ctx, p)
 	m.startKeepAlive(ctx, p)
 	return nil
+}
+
+// probeTrafficViaSOCKS dials well-known IPs through the local SOCKS proxy of
+// the tunnel. Reaching any of them means real traffic is passing.
+func probeTrafficViaSOCKS(ctx context.Context, socksAddr string) error {
+	d, err := proxy.SOCKS5("tcp", socksAddr, nil, &net.Dialer{Timeout: 8 * time.Second})
+	if err != nil {
+		return fmt.Errorf("socks dialer: %w", err)
+	}
+	targets := []string{"1.1.1.1:80", "8.8.8.8:53", "9.9.9.9:80"}
+	var lastErr error
+	for _, t := range targets {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		conn, err := d.Dial("tcp", t)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = conn.Close()
+		return nil
+	}
+	return fmt.Errorf("no traffic through %s: %w", socksAddr, lastErr)
+}
+
+// verifyTraffic runs a one-shot traffic probe shortly after connecting and
+// records the outcome in the status and the logs.
+func (m *Manager) verifyTraffic(ctx context.Context, socksAddr string) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(2 * time.Second):
+	}
+	if err := probeTrafficViaSOCKS(ctx, socksAddr); err != nil {
+		m.mu.Lock()
+		m.status.Traffic = "failed"
+		m.mu.Unlock()
+		m.logger.Add("warn", "connected but no traffic is passing the tunnel: %v (the server may be offline or blocking this network)", err)
+		return
+	}
+	m.mu.Lock()
+	m.status.Traffic = "ok"
+	m.mu.Unlock()
+	m.logger.Add("info", "tunnel traffic verified OK")
 }
 
 func profileDNSServers(p config.Profile) []string {
