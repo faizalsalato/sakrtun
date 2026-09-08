@@ -135,9 +135,10 @@ if (Test-Path (Join-Path $toolsO "openvpn.exe")) {
         Write-Host "Copying the system OpenVPN install..."
         Copy-Item (Join-Path $sysBin "*") $toolsO -Force
     } else {
-        Write-Host "Downloading the official OpenVPN MSI and installing silently (drivers included)..."
-        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/OpenVPN/openvpn/releases/latest" -TimeoutSec 60
-        $ver = $rel.tag_name.TrimStart("v")
+        Write-Host "Downloading the official OpenVPN 2.6 MSI and installing silently (TAP driver included)..."
+        # Stick to the 2.6 line: its MSI still bundles and installs the
+        # TAP-Windows6 driver automatically, unlike the 2.7 MSI (dco only).
+        $ver = "2.6.13"
         $msiUrl = $null
         foreach ($build in @("I001", "I002", "I003", "I004", "I005")) {
             $candidate = "https://swupdate.openvpn.org/community/releases/OpenVPN-$ver-$build-amd64.msi"
