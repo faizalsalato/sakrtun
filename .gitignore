@@ -31,3 +31,4 @@ configs/settings.json
 *.tmp
 configs/xray-profile-*.json
 configs/proxifier-profile-*.ppx
+tools/proxifier/Profiles/`ntools/proxifier/Settings.ini
