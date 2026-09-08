@@ -497,6 +497,7 @@ func (u *UI) updateModePanel() {
 		tabs.Append(tabPage("UDPGW", u.udpgwSection()))
 	}
 	if mode != config.ModeOpenVPN {
+		tabs.Append(tabPage("Proxifier", u.proxifierSection()))
 		tabs.Append(tabPage("TUN", u.tunSection()))
 	}
 	tabs.Append(tabPage("Logs", u.logsSection()))
@@ -519,9 +520,6 @@ func (u *UI) mainSection() fyne.CanvasObject {
 		widget.NewFormItem("Tunnel mode", u.mode),
 		widget.NewFormItem("Route mode", u.routeMode),
 		widget.NewFormItem("SOCKS proxy", container.NewHBox(u.socksInfo, u.socksCopy)),
-		widget.NewFormItem("Proxifier executable", u.proxifierExe),
-		widget.NewFormItem("Proxifier license name", u.proxifierLicName),
-		widget.NewFormItem("Proxifier license key", u.proxifierLicKey),
 		widget.NewFormItem("", u.routeModeTip()),
 		widget.NewFormItem("Local SOCKS host", u.localSocksHost),
 		widget.NewFormItem("Local SOCKS port", u.localSocksPort),
@@ -530,6 +528,17 @@ func (u *UI) mainSection() fyne.CanvasObject {
 		widget.NewFormItem("Reconnect delay seconds", u.reconnectDelay),
 		widget.NewFormItem("Reconnect max retries", u.reconnectMax),
 		widget.NewFormItem("Reconnect check seconds", u.reconnectCheck),
+	))
+}
+
+// proxifierSection holds the Proxifier integration settings, kept out of the
+// Main tab to save screen space. They only matter for the "Proxifier (force
+// apps)" route mode.
+func (u *UI) proxifierSection() fyne.CanvasObject {
+	return section("Proxifier", "Settings for the 'Proxifier (force apps)' route mode. Leave the executable empty to auto-detect it; the license key is registered automatically before Proxifier is launched.", widget.NewForm(
+		widget.NewFormItem("Executable", u.proxifierExe),
+		widget.NewFormItem("License name", u.proxifierLicName),
+		widget.NewFormItem("License key", u.proxifierLicKey),
 	))
 }
 
