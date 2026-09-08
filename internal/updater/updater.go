@@ -49,6 +49,9 @@ func fetchLatestRelease(repo string) (release, error) {
 		if resp.StatusCode == http.StatusNotFound {
 			return r, fmt.Errorf("github api returned 404 (repository not found or not accessible)")
 		}
+		if resp.StatusCode == http.StatusForbidden {
+			return r, fmt.Errorf("github api returned 403 (rate limited or this network's IP is blocked)")
+		}
 		return r, fmt.Errorf("github api returned %s", resp.Status)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
@@ -57,13 +60,55 @@ func fetchLatestRelease(repo string) (release, error) {
 	return r, nil
 }
 
+// fetchLatestTag returns the tag of the latest GitHub release for repo by
+// following the website redirect (https://github.com/<repo>/releases/latest).
+// This avoids the GitHub REST API entirely: the website is not subject to the
+// anonymous API rate limit (60/hour per IP) nor to the 403 blocks applied to
+// datacenter/VPN IPs, so it keeps working when the traffic leaves through a
+// VPN tunnel. It falls back to the API when the website is unreachable.
+func fetchLatestTag(repo string) (string, error) {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest("GET", "https://github.com/"+repo+"/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "SAKRTUN")
+	var webErr error
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+		loc := resp.Header.Get("Location")
+		if idx := strings.LastIndex(loc, "/tag/"); idx >= 0 {
+			tag := loc[idx+len("/tag/"):]
+			if tag != "" {
+				return tag, nil
+			}
+		}
+		webErr = fmt.Errorf("github website returned %s without a release tag", resp.Status)
+	} else {
+		webErr = err
+	}
+	// Fallback to the API.
+	r, apiErr := fetchLatestRelease(repo)
+	if apiErr != nil {
+		return "", fmt.Errorf("github website failed: %v (api also failed: %v)", webErr, apiErr)
+	}
+	return r.TagName, nil
+}
+
 func downloadFile(url, dest string) error {
+	client := &http.Client{Timeout: downloadTimeout}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "SAKRTUN")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -162,11 +207,31 @@ const appReleaseRepo = "faizalsalato/sakrtun"
 // LatestAppVersion returns the latest app version from the GitHub releases of
 // faizalsalato/sakrtun (tag without the leading "v").
 func LatestAppVersion() (string, error) {
-	r, err := fetchLatestRelease(appReleaseRepo)
+	tag, err := fetchLatestTag(appReleaseRepo)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimPrefix(r.TagName, "v"), nil
+	return strings.TrimPrefix(tag, "v"), nil
+}
+
+// appSetupURLs returns the candidate download URLs for the app installer of
+// the given tag. The direct release-download URL is tried first (it works
+// without the GitHub API), and any API-discovered asset URLs are used as
+// fallback when the API is reachable.
+func appSetupURLs(tag string) []string {
+	ver := strings.TrimPrefix(tag, "v")
+	urls := []string{
+		fmt.Sprintf("https://github.com/%s/releases/download/%s/SAKRTUN-Setup-%s.exe", appReleaseRepo, tag, ver),
+	}
+	if r, err := fetchLatestRelease(appReleaseRepo); err == nil {
+		for _, a := range r.Assets {
+			n := strings.ToLower(a.Name)
+			if strings.HasPrefix(n, "sakrtun-setup-") && strings.HasSuffix(n, ".exe") {
+				urls = append(urls, a.URL)
+			}
+		}
+	}
+	return urls
 }
 
 // UpdateApp downloads the latest SAKRTUN-Setup installer from GitHub and runs
@@ -176,33 +241,31 @@ func UpdateApp(root, currentVersion string, log Logger) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("app auto-update is only supported on Windows")
 	}
-	r, err := fetchLatestRelease(appReleaseRepo)
+	tag, err := fetchLatestTag(appReleaseRepo)
 	if err != nil {
 		return "", err
 	}
-	ver := strings.TrimPrefix(r.TagName, "v")
-	var url string
-	for _, a := range r.Assets {
-		n := strings.ToLower(a.Name)
-		if strings.HasPrefix(n, "sakrtun-setup-") && strings.HasSuffix(n, ".exe") {
-			url = a.URL
-			break
-		}
-	}
-	if url == "" {
-		return "", fmt.Errorf("no SAKRTUN-Setup asset found in release %s", r.TagName)
-	}
+	ver := strings.TrimPrefix(tag, "v")
 	tmp, err := os.MkdirTemp("", "sakr-app")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
 	setupPath := filepath.Join(tmp, "SAKRTUN-Setup.exe")
-	if log != nil {
-		log("info", "app update: downloading %s ...", url)
+	var lastErr error
+	for _, url := range appSetupURLs(tag) {
+		if log != nil {
+			log("info", "app update: downloading %s ...", url)
+		}
+		if err := downloadFile(url, setupPath); err == nil {
+			lastErr = nil
+			break
+		} else {
+			lastErr = err
+		}
 	}
-	if err := downloadFile(url, setupPath); err != nil {
-		return "", fmt.Errorf("download failed: %w", err)
+	if lastErr != nil {
+		return "", fmt.Errorf("download failed: %w", lastErr)
 	}
 	if log != nil {
 		log("info", "app update: installing %s silently (the app restarts automatically) ...", ver)
@@ -224,11 +287,11 @@ func InstalledOpenVPNVersion(root string) string {
 }
 
 func LatestOpenVPNVersion() (string, error) {
-	r, err := fetchLatestRelease("OpenVPN/openvpn")
+	tag, err := fetchLatestTag("OpenVPN/openvpn")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimPrefix(r.TagName, "v"), nil
+	return strings.TrimPrefix(tag, "v"), nil
 }
 
 // openvpnInstallerURL returns the Windows amd64 MSI download URL for the
@@ -332,11 +395,11 @@ func InstalledXrayVersion(root string) string {
 }
 
 func LatestXrayVersion() (string, error) {
-	r, err := fetchLatestRelease("XTLS/Xray-core")
+	tag, err := fetchLatestTag("XTLS/Xray-core")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimPrefix(r.TagName, "v"), nil
+	return strings.TrimPrefix(tag, "v"), nil
 }
 
 func xrayAssetSuffix() string {
@@ -361,23 +424,27 @@ func xrayAssetSuffix() string {
 // executable and data files in tools/xray. The tunnel must be disconnected
 // first, otherwise the running xray.exe cannot be replaced on Windows.
 func UpdateXray(root string, log Logger) (string, error) {
-	r, err := fetchLatestRelease("XTLS/Xray-core")
+	tag, err := fetchLatestTag("XTLS/Xray-core")
 	if err != nil {
 		return "", err
 	}
+	ver := strings.TrimPrefix(tag, "v")
 	suffix := xrayAssetSuffix()
 	if suffix == "" {
 		return "", fmt.Errorf("no xray release asset for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	var url string
-	for _, a := range r.Assets {
-		if strings.HasPrefix(a.Name, "Xray-") && strings.HasSuffix(a.Name, suffix) {
-			url = a.URL
-			break
-		}
+	// The direct release-download URL works without the GitHub API; the
+	// API-discovered asset URL is used as fallback when the API is reachable.
+	urls := []string{
+		fmt.Sprintf("https://github.com/XTLS/Xray-core/releases/download/%s/Xray-%s.zip", tag, suffix),
 	}
-	if url == "" {
-		return "", fmt.Errorf("no xray release asset found for %s", suffix)
+	if r, apiErr := fetchLatestRelease("XTLS/Xray-core"); apiErr == nil {
+		for _, a := range r.Assets {
+			if strings.HasPrefix(a.Name, "Xray-") && strings.HasSuffix(a.Name, suffix) {
+				urls = append(urls, a.URL)
+				break
+			}
+		}
 	}
 	tmp, err := os.MkdirTemp("", "sakr-xray")
 	if err != nil {
@@ -385,11 +452,20 @@ func UpdateXray(root string, log Logger) (string, error) {
 	}
 	defer os.RemoveAll(tmp)
 	zipPath := filepath.Join(tmp, "xray.zip")
-	if log != nil {
-		log("info", "xray update: downloading %s ...", url)
+	var lastErr error
+	for _, url := range urls {
+		if log != nil {
+			log("info", "xray update: downloading %s ...", url)
+		}
+		if err := downloadFile(url, zipPath); err == nil {
+			lastErr = nil
+			break
+		} else {
+			lastErr = err
+		}
 	}
-	if err := downloadFile(url, zipPath); err != nil {
-		return "", fmt.Errorf("download failed: %w", err)
+	if lastErr != nil {
+		return "", fmt.Errorf("download failed: %w", lastErr)
 	}
 	extract := filepath.Join(tmp, "ext")
 	if err := os.MkdirAll(extract, 0o755); err != nil {
@@ -410,7 +486,6 @@ func UpdateXray(root string, log Logger) (string, error) {
 			}
 		}
 	}
-	ver := strings.TrimPrefix(r.TagName, "v")
 	if log != nil {
 		log("info", "xray updated to %s", ver)
 	}
