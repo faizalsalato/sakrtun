@@ -492,13 +492,24 @@ func (m *Manager) startKeepAlive(ctx context.Context, p config.Profile) {
 	}()
 }
 
+// sendSSHKeepAlive sends an SSH keepalive request and waits for the reply.
+// It must NOT set a deadline on the shared connection: that deadline applies
+// to every read/write of the tunnel (all SSH channels multiplex the same
+// net.Conn), so a slow reply would kill the whole tunnel and trigger
+// reconnects. A per-call timeout is used instead, leaving the tunnel traffic
+// untouched.
 func sendSSHKeepAlive(sshc *sshBundle) error {
-	if sshc.Conn != nil {
-		_ = sshc.Conn.SetDeadline(time.Now().Add(5 * time.Second))
-		defer sshc.Conn.SetDeadline(time.Time{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := sshc.Client.SendRequest("keepalive@openssh.com", true, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("keepalive timed out")
 	}
-	_, _, err := sshc.Client.SendRequest("keepalive@openssh.com", true, nil)
-	return err
 }
 
 func (m *Manager) isManualStopped() bool {
