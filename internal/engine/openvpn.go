@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"socksrevivepc/internal/config"
+	"socksrevivepc/internal/wintunloader"
 )
 
 const openVPNReadyLine = "Initialization Sequence Completed"
@@ -55,22 +57,84 @@ func startOpenVPN(ctx context.Context, root string, p config.Profile, logger *Lo
 	if err := ensureOpenVPNInteractiveService(); err != nil && logger != nil {
 		logger.Add("warn", "openvpn interactive service: %v", err)
 	}
-	// OpenVPN 2.7 supports ovpn-dco and tap-windows6 (Wintun support was
-	// removed). Machines without any of those drivers fail with "All
-	// tap-windows6 adapters are currently in use or disabled", so install the
-	// bundled driver and create an adapter when none is present.
-	if err := ensureOpenVPNAdapter(root, logger); err != nil && logger != nil {
-		logger.Add("warn", "openvpn adapter driver: %v", err)
+	// With --windows-driver wintun, OpenVPN loads wintun.dll from its own
+	// directory (or the system search path) and reuses the "Wintun" adapter,
+	// so no system driver installation is needed: prepare the embedded Wintun
+	// DLL, create the adapter when missing, and place the DLL next to
+	// openvpn.exe.
+	if runtime.GOOS == "windows" {
+		if err := wintunloader.Prepare(logger); err != nil && logger != nil {
+			logger.Add("warn", "wintun prepare: %v", err)
+		}
+		if err := ensureWintunAdapterForOpenVPN(); err != nil && logger != nil {
+			logger.Add("warn", "wintun adapter for openvpn: %v", err)
+		}
+		sources := []string{
+			filepath.Join(root, "tools", "wintun", "amd64", "wintun.dll"),
+		}
+		if appExe, err := os.Executable(); err == nil {
+			sources = append(sources, filepath.Join(filepath.Dir(appExe), "wintun.dll"))
+		}
+		for _, src := range sources {
+			data, err := os.ReadFile(src)
+			if err != nil {
+				continue
+			}
+			dst := filepath.Join(filepath.Dir(exe), "wintun.dll")
+			if _, statErr := os.Stat(dst); statErr == nil {
+				break
+			}
+			if err := os.WriteFile(dst, data, 0o755); err == nil && logger != nil {
+				logger.Add("info", "wintun.dll placed next to openvpn.exe for the Wintun driver")
+			}
+			break
+		}
 	}
 
-	proc, err := StartProcessWithReady(ctx, root, "openvpn", exe, args, logger, openVPNReadyLine)
+	// First attempt: the Wintun driver (no system driver install needed).
+	wintunArgs := append(append([]string{}, args...), "--windows-driver", "wintun")
+	proc, err := StartProcessWithReady(ctx, root, "openvpn", exe, wintunArgs, logger, openVPNReadyLine)
 	if err != nil {
-		// Only remove the file this function created; never delete a user
-		// configured --auth-user-pass file on failure.
 		if tempAuthFile != "" {
 			_ = os.Remove(tempAuthFile)
 		}
 		return nil, "", err
+	}
+	if runtime.GOOS == "windows" {
+		// Give the Wintun attempt a short window. When the process dies before
+		// connecting (e.g. VMs where the Wintun device cannot be opened),
+		// retry with the default driver selection (ovpn-dco with tap-windows6
+		// fallback), installing the bundled driver package when missing.
+		select {
+		case <-proc.Ready():
+			return proc, tempAuthFile, nil
+		case <-proc.ExitChan():
+			if exited, procErr := proc.Exited(); exited {
+				if logger != nil {
+					logger.Add("warn", "openvpn with wintun failed (%v); retrying with the default driver...", procErr)
+				}
+				if driverErr := ensureOpenVPNAdapter(root, logger); driverErr != nil && logger != nil {
+					logger.Add("warn", "openvpn adapter driver: %v", driverErr)
+				}
+				proc, err = StartProcessWithReady(ctx, root, "openvpn", exe, args, logger, openVPNReadyLine)
+				if err != nil {
+					if tempAuthFile != "" {
+						_ = os.Remove(tempAuthFile)
+					}
+					return nil, "", err
+				}
+				return proc, tempAuthFile, nil
+			}
+			if logger != nil {
+				logger.Add("warn", "openvpn (wintun) stopped before connecting")
+			}
+		case <-time.After(10 * time.Second):
+			// Still connecting with Wintun; the manager keeps waiting for the
+			// ready line.
+			return proc, tempAuthFile, nil
+		case <-ctx.Done():
+			return proc, tempAuthFile, nil
+		}
 	}
 	return proc, tempAuthFile, nil
 }
@@ -96,11 +160,10 @@ func ensureOpenVPNInteractiveService() error {
 }
 
 // ensureOpenVPNAdapter makes sure the machine has a virtual adapter driver
-// OpenVPN can use (ovpn-dco preferred, tap-windows6 as fallback). OpenVPN 2.7
-// no longer ships these drivers with its MSI, so machines without them fail
-// with "All tap-windows6 adapters are currently in use or disabled". The
-// bundled driver packages live in tools/openvpn/driver; pnputil installs them
-// and tapctl (bundled with OpenVPN) creates the adapter.
+// OpenVPN can use (ovpn-dco preferred, tap-windows6 as fallback). Used when
+// the Wintun attempt fails. The bundled driver packages live in
+// tools/openvpn/driver; pnputil installs them and tapctl (bundled with
+// OpenVPN) creates the adapter.
 func ensureOpenVPNAdapter(root string, logger *Logger) error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -115,7 +178,6 @@ func ensureOpenVPNAdapter(root string, logger *Logger) error {
 			return nil // a usable adapter driver is already present
 		}
 	}
-	// Try the ovpn-dco driver first (recommended by OpenVPN 2.7).
 	dcoInf := filepath.Join(root, "tools", "openvpn", "driver", "ovpn-dco", "ovpndco.inf")
 	if _, err := os.Stat(dcoInf); err == nil {
 		if logger != nil {
@@ -133,7 +195,6 @@ func ensureOpenVPNAdapter(root string, logger *Logger) error {
 			return nil
 		}
 	}
-	// Fallback: the legacy TAP-Windows6 driver.
 	tapInf := filepath.Join(root, "tools", "openvpn", "driver", "tap0901", "OemVista.inf")
 	if _, err := os.Stat(tapInf); err != nil {
 		return fmt.Errorf("no bundled OpenVPN driver package found")
