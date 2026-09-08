@@ -942,8 +942,13 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	if err != nil {
 		return err
 	}
+	// The Portable Edition uses a different profile schema than the normal
+	// build. Writing the wrong schema makes Proxifier warn that the profile
+	// "belongs to another application".
+	portable := isBundledProxifier(m.root, exe)
 	profilePath := filepath.Join(m.root, "configs", "proxifier-profile-"+p.ID+".ppx")
-	if err := os.WriteFile(profilePath, []byte(proxifierProfileXML(socksAddr)), 0o600); err != nil {
+	bypassApps := proxifierBypassApps(p)
+	if err := os.WriteFile(profilePath, []byte(proxifierProfileXML(socksAddr, portable, bypassApps)), 0o600); err != nil {
 		return err
 	}
 	cmd := exec.Command(exe, profilePath)
@@ -955,6 +960,33 @@ func (m *Manager) startProxifier(p config.Profile, socksAddr string) error {
 	m.mu.Unlock()
 	m.logger.Add("info", "proxifier started with SOCKS proxy %s", socksAddr)
 	return nil
+}
+
+// isBundledProxifier reports whether the resolved executable is the bundled
+// Portable Edition copy inside tools/proxifier.
+func isBundledProxifier(root, exe string) bool {
+	rel, err := filepath.Rel(root, exe)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+		strings.HasPrefix(filepath.ToSlash(rel), "tools/proxifier/"))
+}
+
+// proxifierBypassApps returns the process names that must bypass the proxy in
+// the generated Proxifier profile: the app itself and the tunnel tools. Forcing
+// them through the local SOCKS port would loop their own control connection.
+func proxifierBypassApps(p config.Profile) []string {
+	apps := []string{"SAKRTUN.exe"}
+	switch p.Mode {
+	case config.ModeXray:
+		apps = append(apps, "xray.exe")
+	case config.ModeOpenVPN:
+		apps = append(apps, "openvpn.exe")
+	default:
+		apps = append(apps, "dnstt-client.exe")
+	}
+	return apps
 }
 
 // registerProxifierLicense writes the Proxifier registration into the
@@ -1012,17 +1044,37 @@ func resolveProxifierExecutable(root, custom string) (string, error) {
 }
 
 // proxifierProfileXML builds a Proxifier profile that routes all traffic
-// through the given SOCKS5 proxy, leaving localhost direct. It follows the
-// real Proxifier 4 / Proxifier PE schema (version 102), including the
-// portable proxification engine settings.
-func proxifierProfileXML(socksAddr string) string {
+// through the given SOCKS5 proxy, leaving localhost direct. The normal build
+// uses the standard schema (version 101); the Portable Edition uses its own
+// schema (version 102 with the portable proxification engine) - loading the
+// wrong one makes Proxifier warn that the profile belongs to another app.
+// The tunnel processes themselves are bypassed (Direct), otherwise Proxifier
+// would force the Xray/OpenVPN control connection through its own SOCKS port
+// and trigger its "Infinite Connection Loop Detection".
+func proxifierProfileXML(socksAddr string, portable bool, bypassApps []string) string {
 	host := "127.0.0.1"
 	port := "10808"
 	if h, p, err := net.SplitHostPort(socksAddr); err == nil {
 		host, port = h, p
 	}
+	apps := strings.Join(bypassApps, "; ")
+	version := "101"
+	productID := "0"
+	portableEngine := ""
+	if portable {
+		version = "102"
+		productID = "1"
+		portableEngine = `    <ProxificationPortableEngine subsystem="32">` + "\n" +
+			`      <Type hotpatch="true">Prologue</Type>` + "\n" +
+			`      <Location>Winsock</Location>` + "\n" +
+			`    </ProxificationPortableEngine>` + "\n" +
+			`    <ProxificationPortableEngine subsystem="64">` + "\n" +
+			`      <Type hotpatch="false">Prologue</Type>` + "\n" +
+			`      <Location>Winsock</Location>` + "\n" +
+			`    </ProxificationPortableEngine>` + "\n"
+	}
 	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n" +
-		`<ProxifierProfile version="102" platform="Windows" product_id="1" product_minver="400">` + "\n" +
+		`<ProxifierProfile version="` + version + `" platform="Windows" product_id="` + productID + `" product_minver="400">` + "\n" +
 		`  <Options>` + "\n" +
 		`    <Resolve>` + "\n" +
 		`      <AutoModeDetection enabled="true" />` + "\n" +
@@ -1039,14 +1091,7 @@ func proxifierProfileXML(socksAddr string) string {
 		`    <ProcessServices enabled="false" />` + "\n" +
 		`    <HandleDirectConnections enabled="false" />` + "\n" +
 		`    <HttpProxiesSupport enabled="false" />` + "\n" +
-		`    <ProxificationPortableEngine subsystem="32">` + "\n" +
-		`      <Type hotpatch="true">Prologue</Type>` + "\n" +
-		`      <Location>Winsock</Location>` + "\n" +
-		`    </ProxificationPortableEngine>` + "\n" +
-		`    <ProxificationPortableEngine subsystem="64">` + "\n" +
-		`      <Type hotpatch="false">Prologue</Type>` + "\n" +
-		`      <Location>Winsock</Location>` + "\n" +
-		`    </ProxificationPortableEngine>` + "\n" +
+		portableEngine +
 		`  </Options>` + "\n" +
 		`  <ProxyList>` + "\n" +
 		`    <Proxy id="100" type="SOCKS5">` + "\n" +
@@ -1061,6 +1106,11 @@ func proxifierProfileXML(socksAddr string) string {
 		`      <Action type="Direct" />` + "\n" +
 		`      <Targets>localhost; 127.0.0.1; %ComputerName%; ::1</Targets>` + "\n" +
 		`      <Name>Localhost</Name>` + "\n" +
+		`    </Rule>` + "\n" +
+		`    <Rule enabled="true">` + "\n" +
+		`      <Action type="Direct" />` + "\n" +
+		`      <Applications>` + apps + `</Applications>` + "\n" +
+		`      <Name>SAKR TUN bypass</Name>` + "\n" +
 		`    </Rule>` + "\n" +
 		`    <Rule enabled="true">` + "\n" +
 		`      <Action type="Proxy">100</Action>` + "\n" +

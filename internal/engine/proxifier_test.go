@@ -49,17 +49,37 @@ func TestResolveProxifierExecutableCustomRelative(t *testing.T) {
 }
 
 func TestProxifierProfileXML(t *testing.T) {
-	xmlStr := proxifierProfileXML("127.0.0.1:10808")
-	if !strings.Contains(xmlStr, "<Address>127.0.0.1</Address>") || !strings.Contains(xmlStr, "<Port>10808</Port>") {
-		t.Fatalf("profile does not contain the SOCKS address:\n%s", xmlStr)
-	}
-	var doc struct {
-		XMLName xml.Name `xml:"ProxifierProfile"`
-	}
-	if err := xml.Unmarshal([]byte(xmlStr), &doc); err != nil {
-		t.Fatalf("profile is not valid XML: %v", err)
-	}
-	if doc.XMLName.Local != "ProxifierProfile" {
-		t.Fatalf("unexpected root element: %s", doc.XMLName.Local)
+	for _, portable := range []bool{false, true} {
+		xmlStr := proxifierProfileXML("127.0.0.1:10808", portable, []string{"SAKRTUN.exe", "xray.exe"})
+		if !strings.Contains(xmlStr, "<Address>127.0.0.1</Address>") || !strings.Contains(xmlStr, "<Port>10808</Port>") {
+			t.Fatalf("profile does not contain the SOCKS address (portable=%v):\n%s", portable, xmlStr)
+		}
+		var doc struct {
+			XMLName xml.Name `xml:"ProxifierProfile"`
+		}
+		if err := xml.Unmarshal([]byte(xmlStr), &doc); err != nil {
+			t.Fatalf("profile is not valid XML (portable=%v): %v", portable, err)
+		}
+		if doc.XMLName.Local != "ProxifierProfile" {
+			t.Fatalf("unexpected root element: %s", doc.XMLName.Local)
+		}
+		if !strings.Contains(xmlStr, "<Applications>SAKRTUN.exe; xray.exe</Applications>") {
+			t.Fatal("profile must contain the tunnel bypass rule")
+		}
+		if portable {
+			if !strings.Contains(xmlStr, "ProxificationPortableEngine") {
+				t.Fatal("portable profile must include the portable proxification engine")
+			}
+			if !strings.Contains(xmlStr, `version="102"`) {
+				t.Fatal("portable profile must use version 102")
+			}
+		} else {
+			if strings.Contains(xmlStr, "ProxificationPortableEngine") {
+				t.Fatal("normal profile must not include the portable proxification engine")
+			}
+			if !strings.Contains(xmlStr, `version="101"`) {
+				t.Fatal("normal profile must use version 101")
+			}
+		}
 	}
 }
