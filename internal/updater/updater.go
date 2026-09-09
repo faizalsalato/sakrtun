@@ -287,7 +287,11 @@ func InstalledOpenVPNVersion(root string) string {
 }
 
 func LatestOpenVPNVersion() (string, error) {
-	return latestOpenVPN26()
+	tag, err := fetchLatestTag("OpenVPN/openvpn")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(tag, "v"), nil
 }
 
 // openvpnInstallerURL returns the Windows amd64 MSI download URL for the
@@ -318,57 +322,20 @@ func openvpnInstallerURL(version string) (string, error) {
 	return "", fmt.Errorf("no openvpn amd64 msi found for version %s", version)
 }
 
-// openvpnFallback26 is used when the GitHub release list cannot provide a
-// 2.6 tag: the last release of the OpenVPN 2.6 line.
-const openvpnFallback26 = "2.6.13"
-
-// latestOpenVPN26 returns the newest OpenVPN 2.6 release tag (without the
-// leading "v"). The 2.7 MSI no longer installs the TAP-Windows6 driver (only
-// ovpn-dco/wintun), which breaks machines without a pre-installed TAP
-// adapter; the 2.6 MSI still bundles and installs the TAP driver
-// automatically, so the app sticks to the 2.6 line.
-func latestOpenVPN26() (string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest("GET", "https://api.github.com/repos/OpenVPN/openvpn/releases?per_page=100", nil)
-	if err != nil {
-		return openvpnFallback26, nil
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "SAKRTUN")
-	resp, err := client.Do(req)
-	if err != nil {
-		return openvpnFallback26, nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return openvpnFallback26, nil
-	}
-	var releases []release
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return openvpnFallback26, nil
-	}
-	for _, r := range releases {
-		tag := strings.TrimPrefix(r.TagName, "v")
-		if strings.HasPrefix(tag, "2.6.") {
-			return tag, nil
-		}
-	}
-	return openvpnFallback26, nil
-}
-
-// UpdateOpenVPN downloads the OpenVPN 2.6 Windows installer, runs it silently
-// (installing the TAP-Windows6 driver automatically), and then refreshes the
-// bundled copy in tools/openvpn from the updated install. Requires
-// administrator rights (the app already runs elevated). The tunnel must be
-// disconnected first so the bundled openvpn.exe can be replaced.
+// UpdateOpenVPN downloads the latest official OpenVPN Windows installer, runs
+// it silently (updating the system install and its TAP driver), and then
+// refreshes the bundled copy in tools/openvpn from the updated install.
+// Requires administrator rights (the app already runs elevated). The tunnel
+// must be disconnected first so the bundled openvpn.exe can be replaced.
 func UpdateOpenVPN(root string, log Logger) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("openvpn auto-update is only supported on Windows (use your package manager)")
 	}
-	ver, err := latestOpenVPN26()
+	tag, err := fetchLatestTag("OpenVPN/openvpn")
 	if err != nil {
 		return "", err
 	}
+	ver := strings.TrimPrefix(tag, "v")
 	url, err := openvpnInstallerURL(ver)
 	if err != nil {
 		return "", err
