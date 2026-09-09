@@ -322,11 +322,36 @@ func openvpnInstallerURL(version string) (string, error) {
 	return "", fmt.Errorf("no openvpn amd64 msi found for version %s", version)
 }
 
+// openvpnTapMSI26 is the last OpenVPN 2.6 installer: its MSI still bundles
+// and installs the TAP-Windows6 driver automatically. The newer 2.7 MSI only
+// ships ovpn-dco/wintun, so machines without a pre-installed TAP adapter
+// would fail. Installing the 2.6 MSI first leaves the TAP driver in place
+// for every later version.
+const openvpnTapMSI26 = "https://swupdate.openvpn.org/community/releases/OpenVPN-2.6.13-I001-amd64.msi"
+
+// hasVirtualAdapterDriver reports whether the machine already has a virtual
+// adapter driver OpenVPN can use (tap0901 or ovpn-dco).
+func hasVirtualAdapterDriver(root string) bool {
+	tapctl := filepath.Join(root, "tools", "openvpn", "tapctl.exe")
+	if _, err := os.Stat(tapctl); err != nil {
+		return true // non-bundled setup - assume the system handles it
+	}
+	out, err := exec.Command(tapctl, "list").CombinedOutput()
+	if err != nil {
+		return true
+	}
+	text := string(out)
+	return strings.Contains(text, "tap0901") || strings.Contains(text, "ovpn-dco")
+}
+
 // UpdateOpenVPN downloads the latest official OpenVPN Windows installer, runs
-// it silently (updating the system install and its TAP driver), and then
-// refreshes the bundled copy in tools/openvpn from the updated install.
-// Requires administrator rights (the app already runs elevated). The tunnel
-// must be disconnected first so the bundled openvpn.exe can be replaced.
+// it silently (updating the system install), and then refreshes the bundled
+// copy in tools/openvpn from the updated install. On machines without any
+// virtual adapter driver, it first installs the OpenVPN 2.6 MSI (which
+// installs the TAP-Windows6 driver automatically), so later versions keep
+// working with the TAP adapter already present. Requires administrator rights
+// (the app already runs elevated). The tunnel must be disconnected first so
+// the bundled openvpn.exe can be replaced.
 func UpdateOpenVPN(root string, log Logger) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("openvpn auto-update is only supported on Windows (use your package manager)")
@@ -345,6 +370,28 @@ func UpdateOpenVPN(root string, log Logger) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
+
+	// First: machines without a TAP/dco driver install the OpenVPN 2.6 MSI,
+	// which brings the TAP-Windows6 driver. Later versions keep it.
+	if !hasVirtualAdapterDriver(root) {
+		if log != nil {
+			log("info", "openvpn update: no virtual adapter driver found; installing the OpenVPN 2.6 MSI for the TAP driver...")
+		}
+		tapMSI := filepath.Join(tmp, "openvpn26.msi")
+		if err := downloadFile(openvpnTapMSI26, tapMSI); err != nil {
+			if log != nil {
+				log("warn", "openvpn update: could not download the 2.6 MSI: %v", err)
+			}
+		} else {
+			out, _ := exec.Command("msiexec", "/i", tapMSI, "/qn", "/norestart").CombinedOutput()
+			// 1603 happens when a newer version is already installed; the TAP
+			// driver is then typically present anyway.
+			if log != nil {
+				log("info", "openvpn update: 2.6 MSI finished (%s)", strings.TrimSpace(string(out)))
+			}
+		}
+	}
+
 	msi := filepath.Join(tmp, "openvpn.msi")
 	if log != nil {
 		log("info", "openvpn update: downloading %s ...", url)
